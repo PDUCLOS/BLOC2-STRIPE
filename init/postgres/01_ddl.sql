@@ -1,0 +1,171 @@
+-- =====================================================================
+-- Stripe Polyglot — Initialisation PostgreSQL (OLTP)
+-- Exécuté automatiquement au 1er démarrage du conteneur postgres
+-- =====================================================================
+
+-- Extensions
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- =====================================================================
+-- Schéma OLTP — tables métier
+-- =====================================================================
+
+CREATE TABLE merchants (
+    merchant_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name          VARCHAR(255) NOT NULL,
+    email         VARCHAR(255) NOT NULL UNIQUE,
+    country_code  CHAR(2) NOT NULL,
+    tier          VARCHAR(20) NOT NULL DEFAULT 'standard',
+    status        VARCHAR(20) NOT NULL DEFAULT 'active',
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE customers (
+    customer_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email         VARCHAR(255) NOT NULL,
+    name          VARCHAR(255),
+    country_code  CHAR(2),
+    segment       VARCHAR(50),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_customers_email ON customers(email);
+CREATE INDEX idx_customers_segment ON customers(segment);
+
+CREATE TABLE payment_methods (
+    pm_id         UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    customer_id   UUID NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
+    type          VARCHAR(30) NOT NULL,
+    brand         VARCHAR(20),
+    last4         CHAR(4),
+    fingerprint   VARCHAR(64),
+    is_default    BOOLEAN NOT NULL DEFAULT FALSE,
+    expires_at    DATE,
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_pm_customer ON payment_methods(customer_id);
+
+CREATE TABLE transactions (
+    txn_id           UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    merchant_id      UUID NOT NULL REFERENCES merchants(merchant_id),
+    customer_id      UUID REFERENCES customers(customer_id),
+    pm_id            UUID REFERENCES payment_methods(pm_id),
+    amount           BIGINT NOT NULL,
+    currency         CHAR(3) NOT NULL,
+    status           VARCHAR(20) NOT NULL,
+    fraud_score      NUMERIC(5,4),
+    idempotency_key  VARCHAR(128) UNIQUE,
+    device_type      VARCHAR(50),
+    ip_country       CHAR(2),
+    metadata         JSONB,
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_txn_merchant   ON transactions(merchant_id, created_at DESC);
+CREATE INDEX idx_txn_customer   ON transactions(customer_id, created_at DESC);
+CREATE INDEX idx_txn_status     ON transactions(status);
+CREATE INDEX idx_txn_created_at ON transactions(created_at DESC);
+CREATE INDEX idx_txn_fraud      ON transactions(fraud_score) WHERE fraud_score IS NOT NULL;
+
+CREATE TABLE refunds (
+    refund_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    txn_id      UUID NOT NULL REFERENCES transactions(txn_id),
+    amount      BIGINT NOT NULL,
+    reason      VARCHAR(100),
+    status      VARCHAR(20) NOT NULL DEFAULT 'pending',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_refunds_txn ON refunds(txn_id);
+
+CREATE TABLE fraud_indicators (
+    fraud_id        UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    txn_id          UUID NOT NULL REFERENCES transactions(txn_id),
+    anomaly_score   NUMERIC(5,4) NOT NULL,
+    rules_triggered TEXT[],
+    model_version   VARCHAR(20),
+    decision        VARCHAR(10) NOT NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_fraud_txn ON fraud_indicators(txn_id);
+CREATE INDEX idx_fraud_decision ON fraud_indicators(decision, created_at DESC);
+
+-- =====================================================================
+-- Trigger updated_at
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_merchants_updated_at
+  BEFORE UPDATE ON merchants
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_transactions_updated_at
+  BEFORE UPDATE ON transactions
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- =====================================================================
+-- Publication pour Debezium (CDC)
+-- =====================================================================
+
+-- Publication : Debezium ne lit QUE les tables qu'on liste ici
+CREATE PUBLICATION stripe_publication FOR TABLE
+    public.transactions,
+    public.refunds,
+    public.fraud_indicators;
+
+-- =====================================================================
+-- Vues matérialisées (analytics temps réel)
+-- =====================================================================
+
+CREATE MATERIALIZED VIEW mv_daily_revenue AS
+SELECT
+    DATE_TRUNC('day', created_at) AS day,
+    currency,
+    COUNT(*) AS txn_count,
+    SUM(amount) AS gross_amount_cents,
+    AVG(fraud_score) AS avg_fraud_score
+FROM transactions
+WHERE status = 'succeeded'
+GROUP BY DATE_TRUNC('day', created_at), currency
+WITH NO DATA;
+
+CREATE UNIQUE INDEX idx_mv_daily_revenue ON mv_daily_revenue(day, currency);
+
+CREATE MATERIALIZED VIEW mv_merchant_stats AS
+SELECT
+    m.merchant_id,
+    m.name,
+    m.tier,
+    COUNT(t.txn_id) AS txn_count,
+    COALESCE(SUM(t.amount) FILTER (WHERE t.status = 'succeeded'), 0) AS gmv_cents,
+    COALESCE(AVG(t.fraud_score), 0) AS avg_fraud_score
+FROM merchants m
+LEFT JOIN transactions t ON t.merchant_id = m.merchant_id
+GROUP BY m.merchant_id, m.name, m.tier
+WITH NO DATA;
+
+CREATE UNIQUE INDEX idx_mv_merchant_stats ON mv_merchant_stats(merchant_id);
+
+-- =====================================================================
+-- Utilisateur de réplication (Debezium)
+-- =====================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'replication_user') THEN
+        CREATE ROLE replication_user WITH REPLICATION LOGIN;
+    END IF;
+END $$;
+
+-- Le mot de passe de replication_user sera défini par une migration séparée
+-- (postgres_init_roles.sh) pour ne pas hardcoder dans le SQL init
+
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO replication_user;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO replication_user;

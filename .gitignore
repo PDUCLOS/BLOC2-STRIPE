@@ -1,0 +1,37 @@
+# === Secrets (JAMAIS sur git) ===
+.env
+.env.local
+.env.*
+!.env.example
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# === Données runtime des conteneurs (Postgres, Mongo, Redis, Kafka, Debezium, Flink) ===
+data/
+
+# === Logs ===
+*.log
+logs/
+
+# === IDE / OS / Agents ===
+.idea/
+.idea_modules/
+.vscode/
+.claude/
+.DS_Store
+*.swp
+*.swo
+
+# === Fichiers temporaires Office ===
+~$*
