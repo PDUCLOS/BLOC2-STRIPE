@@ -51,6 +51,8 @@ def insert_merchants(cur):
         cur: Curseur de la base de données PostgreSQL.
     """
     print(f"  → Inserting {N_MERCHANTS} merchants...")
+    # Les jeux de données seed restent déterministes (seed RNG global) pour
+    # faciliter la reproductibilité des démos et des tests.
     rows = []
     used_emails = set()
     for _ in range(N_MERCHANTS):
@@ -160,7 +162,7 @@ def main():
     print("🌱 Seeding data...")
     with psycopg2.connect(**PG_CONFIG) as conn:
         with conn.cursor() as cur:
-            # Reset (cascade to PM)
+            # Reset complet pour éviter les biais de runs précédents pendant la démo.
             print("  → Truncating existing data...")
             cur.execute("TRUNCATE merchants, customers, payment_methods, transactions, refunds, fraud_indicators RESTART IDENTITY CASCADE")
 

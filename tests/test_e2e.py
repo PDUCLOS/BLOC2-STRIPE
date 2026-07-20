@@ -55,6 +55,10 @@ def check(name, fn):
         print(f"{FAIL} {name}  →  {type(e).__name__}: {e}")
 
 
+# Convention de test: chaque test doit rester autonome (setup/cleanup local)
+# pour éviter les effets de bord entre validations successives.
+
+
 # ─── PostgreSQL ─────────────────────────────────────────────────────────────────
 def test_pg_connect():
     """Vérifie la connexion de base à PostgreSQL."""
@@ -275,7 +279,8 @@ def test_mongo_collections():
     expected = {"transaction_logs", "fraud_alerts"}
     missing = expected - existing
     client.close()
-    # Pas d'assert bloquant — les collections sont créées à la volée
+    # Assert volontairement "souple" : en environnement froid, les collections
+    # peuvent ne pas exister tant que le writer n'a pas encore consommé de messages.
     if missing:
         raise AssertionError(f"Collections absentes (le pipeline tourne-t-il ?) : {missing}")
 

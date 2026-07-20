@@ -39,6 +39,8 @@ docker compose --env-file .env up -d postgres redis mongo kafka debezium 2>&1 | 
 # 4. Attendre que tous les services soient healthy
 echo "⏳ Attente des services healthy..."
 for i in {1..30}; do
+    # Debezium peut être "starting" plus longtemps au premier boot;
+    # on exige un minimum de services healthy avant de continuer.
     HEALTHY=$(docker compose --env-file .env ps --format json 2>/dev/null | grep -c '"Health":"healthy"' || echo 0)
     if [ "$HEALTHY" -ge 4 ]; then
         echo "✅ Services ready"
@@ -77,6 +79,7 @@ echo ""
 echo "🚀 Lancement du pipeline..."
 echo ""
 
+# Logs redirigés dans /tmp pour conserver un terminal propre pendant la soutenance.
 ./venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &
 echo "  → Flink-like job (PID $!)"
 

@@ -48,6 +48,7 @@ def extract_from_pg(target_date: date):
     Returns:
         list[dict]: Liste de dictionnaires contenant les données des transactions extraites.
     """
+    # Extraction bornée sur la journée pour des batches prévisibles et rejouables.
     conn = psycopg2.connect(**PG_CONFIG)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
@@ -155,6 +156,7 @@ def load_to_snowflake(rows, target_date: date):
         return int(d.strftime("%Y%m%d"))
 
     loaded = 0
+    # Traitement par lots pour contrôler mémoire et temps d'exécution côté driver.
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i: i + BATCH_SIZE]
         values = []
@@ -184,6 +186,7 @@ def load_to_snowflake(rows, target_date: date):
                 r["created_at"],
             ))
 
+        # MERGE sur txn_id : idempotent en cas de relance du même batch.
         cur.executemany("""
             MERGE INTO fact_transactions tgt
             USING (SELECT

@@ -43,6 +43,7 @@ def run(cur, sql, label=""):
         label (str, optional): Message à afficher dans la console en cas de succès.
     """
     try:
+        # Centraliser l'exécution ici garantit un logging homogène de toutes les étapes DDL.
         cur.execute(sql)
         if label:
             print(f"  ✓ {label}")
@@ -88,6 +89,7 @@ def main():
     cur.execute(f"USE SCHEMA {SCHEMA}")
 
     print("\n📐 Création des dimensions...")
+    # Dimensions séparées pour garder des faits compacts et faciliter les agrégations BI.
 
     run(cur, """
         CREATE TABLE IF NOT EXISTS dim_date (
@@ -169,6 +171,8 @@ def main():
         )
         CLUSTER BY (date_key, merchant_key)
     """, "Table fact_transactions")
+
+    # Le clustering date+merchant accélère les filtres temporels et les top marchands.
 
     print("\n📅 Pré-peuplement de dim_date (2020-2030)...")
     cur.execute("SELECT COUNT(*) FROM dim_date")

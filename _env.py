@@ -32,6 +32,8 @@ _ENV_PATH = _find_env_file()
 if _ENV_PATH is not None:
     try:
         from dotenv import load_dotenv
+        # override=False preserve la priorité des variables déjà injectées
+        # (utile en CI/CD ou quand docker compose exporte déjà l'environnement).
         load_dotenv(_ENV_PATH, override=False)
     except ImportError:
         # Fallback : parsing manuel (gère quotes et commentaires)

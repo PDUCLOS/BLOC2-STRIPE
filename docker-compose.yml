@@ -76,6 +76,9 @@ services:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: "broker,controller"
+      # Double listener indispensable en local :
+      # - kafka:9092 pour les conteneurs
+      # - localhost:29092 pour les scripts Python host.
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
       KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
@@ -114,6 +117,8 @@ services:
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
       GROUP_ID: stripe-connect
+      # Ces topics internes Connect doivent rester persistants pour reprendre
+      # correctement les offsets en cas de redémarrage de la stack.
       CONFIG_STORAGE_TOPIC: connect-configs
       OFFSET_STORAGE_TOPIC: connect-offsets
       STATUS_STORAGE_TOPIC: connect-status

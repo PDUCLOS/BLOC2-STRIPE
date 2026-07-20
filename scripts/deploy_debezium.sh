@@ -33,6 +33,7 @@ if [ -n "$EXISTING" ]; then
 fi
 
 # Charge le template et substitue les variables
+# Le template versionné évite de disperser la config CDC dans les scripts shell.
 CONFIG=$(python3 - <<EOF
 import json
 from pathlib import Path
@@ -46,6 +47,7 @@ EOF
 )
 
 # POST le connecteur
+# Le code HTTP est inspecté explicitement pour distinguer création, conflit et erreur.
 HTTP_CODE=$(curl -s -o /tmp/debezium_response.txt -w "%{http_code}" \
   -X POST "$CONNECT_URL/connectors" \
   -H "Content-Type: application/json" \

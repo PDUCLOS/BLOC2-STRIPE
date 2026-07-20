@@ -68,7 +68,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Connexions (cachées 5 s pour le live refresh) ─────────────────────────────
+# ── Connexions (cachées 3 s pour le live refresh) ─────────────────────────────
+# Cache court pour limiter les reconnexions à chaque rerun Streamlit, sans garder
+# des états obsolètes trop longtemps pendant la démo en temps réel.
 @st.cache_resource(ttl=3)
 def get_pg():
     """Initialise et met en cache la connexion à PostgreSQL.
@@ -128,6 +130,8 @@ def pg_query(sql, params=None):
     if conn is None:
         return pd.DataFrame()
     try:
+        # En cas de fermeture côté serveur, on évite une exception bruyante
+        # et on laisse l'UI afficher un état "en attente".
         if conn.closed:
             return pd.DataFrame()
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -157,6 +161,7 @@ def kpis_from_pg():
     if df.empty:
         return {}
     row = df.iloc[0]
+    # Protection anti-division par zéro pour le calcul du taux de fraude.
     total = int(row["total_txns"]) if row["total_txns"] else 1
     fraud = int(row["fraud_count"]) if row["fraud_count"] else 0
     return {
@@ -176,6 +181,8 @@ def txn_over_time():
     Returns:
         pd.DataFrame: Données agrégées par minute.
     """
+    # Fenêtre glissante courte (30 min) : suffisante pour visualiser la dynamique live
+    # sans surcharger le rendu Plotly pendant la démo.
     return pg_query("""
         SELECT
             DATE_TRUNC('minute', created_at) AS minute,
@@ -243,6 +250,7 @@ def redis_stats(customer_ids):
     if r is None or not customer_ids:
         return {}
     out = {}
+    # On limite volontairement l'échantillon pour garder une latence UI stable.
     for cid in customer_ids[:5]:
         try:
             v1h = r.zcard(f"v1h_{cid}")
@@ -279,6 +287,7 @@ with st.sidebar:
 
     # Status des services
     st.subheader("🔌 Services")
+    # Vérification "best effort" de disponibilité des services pour feedback instantané.
     pg_ok = get_pg() is not None and not get_pg().closed
     redis_ok = get_redis() is not None
     mongo_ok = get_mongo() is not None
@@ -296,6 +305,9 @@ st.title("💳 Stripe Polyglot — Dashboard Temps Réel")
 st.caption(f"Dernière mise à jour : {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
+# NOTE SOUTENANCE : commencer par ces 5 tuiles pour poser la valeur métier.
+# Message recommandé : volume traité, revenu, puis exposition au risque fraude.
+# Cette séquence évite de "plonger" trop tôt dans la technique.
 kpis = kpis_from_pg()
 if kpis:
     col1, col2, col3, col4, col5 = st.columns(5)
@@ -310,6 +322,9 @@ else:
 st.divider()
 
 # ── CHARTS ROW 1 ───────────────────────────────────────────────────────────────
+# NOTE SOUTENANCE : ici on prouve le "temps réel".
+# Graphe gauche = dynamique minute par minute ; graphe droit = segmentation géographique
+# utile pour expliquer la détection d'anomalies par zone.
 col_left, col_right = st.columns([2, 1])
 
 with col_left:
@@ -361,6 +376,9 @@ with col_right:
 st.divider()
 
 # ── CHARTS ROW 2 ───────────────────────────────────────────────────────────────
+# NOTE SOUTENANCE : ce bloc relie performance commerciale et contrôle du risque.
+# "Top marchands" montre l'activité business ; "Alertes MongoDB" montre la réaction
+# opérationnelle du moteur fraude (review/block) sur les mêmes flux.
 col_merch, col_alerts = st.columns([1, 1])
 
 with col_merch:
@@ -390,6 +408,7 @@ with col_alerts:
     if alerts:
         for a in alerts:
             decision = a.get("decision", "?")
+            # Mapping visuel simple pour différencier immédiatement review vs block.
             color = "🔴" if decision == "block" else "🟡"
             amount = (a.get("amount") or 0) / 100
             score = a.get("fraud_score", 0)
@@ -411,10 +430,14 @@ with col_alerts:
 st.divider()
 
 # ── TRANSACTIONS SUSPECTES ─────────────────────────────────────────────────────
+# NOTE SOUTENANCE : terminer par cette table pour la traçabilité transactionnelle.
+# Elle permet d'illustrer qu'une alerte est explicable (score, pays, device, horodatage),
+# ce qui renforce le discours conformité/auditabilité.
 st.subheader("🔍 Transactions suspectes récentes (score ≥ 0.6)")
 df_sus = recent_suspicious()
 if not df_sus.empty:
-    # Coloriser le score
+    # Conserve la logique de coloration pour un futur .style.applymap ; non activé
+    # ici pour privilégier un affichage Streamlit stable et lisible en démo.
     def color_score(val):
         if val is None:
             return ""
@@ -441,6 +464,8 @@ else:
 st.divider()
 
 # ── ARCHITECTURE ───────────────────────────────────────────────────────────────
+# NOTE SOUTENANCE : ouvrir cet expander en fin de démo pour reconnecter les visuels
+# au pipeline complet (OLTP -> CDC -> Kafka -> scoring -> NoSQL -> OLAP).
 with st.expander("🏗️ Architecture — Pipeline de traitement", expanded=False):
     st.markdown("""
 ```
@@ -474,6 +499,7 @@ Snowflake OLAP (star schema · fact_transactions + 5 dims)
 # ── FOOTER + AUTO-REFRESH ──────────────────────────────────────────────────────
 st.caption("Certification AIA RNCP41993 · Bloc 2 · Patrice Duclos · 2026")
 
-# Auto-refresh via rerun
+# Boucle de rafraîchissement pilotée par le slider sidebar.
+# Le sleep bloque le script courant, puis rerun relance tout le render cycle.
 time.sleep(refresh)
 st.rerun()

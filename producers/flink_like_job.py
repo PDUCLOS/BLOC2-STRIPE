@@ -123,6 +123,7 @@ def score_transaction(txn, r):
         print(f"  [WARN] Redis: {e}", file=sys.stderr)
 
     # Score
+    # Base à 0.1 pour représenter un risque résiduel minimal sur toute transaction.
     score_val = 0.1
     rules = []
 
@@ -296,6 +297,7 @@ def main():
         count += 1
 
         # Write-back fraud_score dans Postgres (optionnel, mais ferme la boucle)
+        # et aligne le dashboard OLTP avec la décision temps réel.
         if pg_conn is not None and scored.get("fraud_score") is not None:
             try:
                 with pg_conn.cursor() as cur:

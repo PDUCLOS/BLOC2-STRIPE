@@ -120,6 +120,8 @@ def build_transaction(is_fraud: bool) -> dict:
             amount = random.randint(100, 500)  # card testing : 1€ → 5€
     currency = random.choice(CURRENCIES)
 
+    # Répartition volontaire pour produire un dataset mixte (fraude vs normal)
+    # qui reste exploitable visuellement dans le dashboard.
     if is_fraud and random.random() < 0.5:
         ip_country = random.choice(FRAUD_COUNTRIES)
     else:
@@ -218,6 +220,7 @@ def main():
                     txn["customer_id"] = customer_id
                     txn["pm_id"] = pm_id
 
+                    # Burst = simulation de card testing / account takeover en rafale.
                     if is_fraud and random.random() < 0.3:
                         burst_remaining = random.randint(12, 20)
                         burst_customer_id = customer_id

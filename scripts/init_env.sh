@@ -13,6 +13,8 @@ fi
 cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
 
 # Substitue les mots de passe par des secrets aléatoires
+# token_urlsafe(24) donne ~32 chars robustes sans caractères problématiques
+# pour la majorité des shells et URI de connexion.
 python3 - <<'EOF'
 import secrets
 import re

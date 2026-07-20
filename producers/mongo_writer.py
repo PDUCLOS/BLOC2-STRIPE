@@ -99,6 +99,8 @@ def main():
         enable_auto_commit=True,
         value_deserializer=lambda v: v.decode("utf-8") if v else None,
     )
+    # Ce consumer lit le flux scoré canonique; les alertes sont dérivées localement
+    # pour garder une source unique de vérité applicative.
 
     count = 0
     alert_count = 0
@@ -137,6 +139,7 @@ def main():
             })
 
             # logs — monitoring opérationnel (requêtes stripe_queries_nosql.js Section 3)
+            # Collection séparée pour distinguer les traces techniques des données métier.
             db.logs.insert_one({
                 "service": "mongo-writer",
                 "type": "access",
