@@ -34,9 +34,9 @@ MONGO_URI  = os.environ.get("MONGO_URI", "mongodb://stripe_app:stripe_pass@local
 FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))
 REVIEW_THRESHOLD = float(os.environ.get("REVIEW_THRESHOLD", 0.60))
 
-PASS = "✅"
-FAIL = "❌"
-SKIP = "⚠️ "
+PASS = "[OK]"
+FAIL = "[FAIL]"
+SKIP = "[SKIP]"
 
 results = []
 
@@ -412,12 +412,12 @@ def main():
     print("\n" + "=" * 60)
     print(f"  Résultats : {passed}/{total} tests passés")
     if failed:
-        print(f"  ❌ {failed} échec(s) :")
+        print(f"  [FAIL] {failed} échec(s) :")
         for r in results:
             if r[0] == FAIL:
-                print(f"     • {r[1]} → {r[2] if len(r) > 2 else ''}")
+                print(f"     - {r[1]} → {r[2] if len(r) > 2 else ''}")
     else:
-        print("  ✅ Tous les tests sont au vert")
+        print("  [OK] Tous les tests sont au vert")
     print("=" * 60)
 
     sys.exit(0 if failed == 0 else 1)

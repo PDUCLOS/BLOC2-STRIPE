@@ -8,14 +8,14 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Charge .env
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
-  echo "❌ .env manquant. Lance : make init-env"
+  echo "[ERROR] .env manquant. Lance : make init-env"
   exit 1
 fi
 set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-echo "🔑 Création du replication_user..."
+echo "Création du replication_user..."
 docker exec -i stripe-postgres psql -U "$PG_USER" -d "$PG_DB" <<EOF
 DO \$\$
 BEGIN
@@ -32,4 +32,4 @@ GRANT SELECT ON ALL TABLES IN SCHEMA public TO ${PG_REPLICATION_USER};
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_REPLICATION_USER};
 EOF
 
-echo "✅ replication_user configuré"
+echo "[OK] replication_user configuré"

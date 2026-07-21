@@ -152,14 +152,8 @@ def insert_payment_methods(cur):
 
 
 def main():
-    """Point d'entrée principal pour l'initialisation des données (seed).
-    
-    1. Se connecte à PostgreSQL.
-    2. Vide les tables existantes (TRUNCATE CASCADE).
-    3. Insère les marchands, les clients et les méthodes de paiement.
-    4. Affiche un résumé du nombre d'enregistrements créés.
-    """
-    print("🌱 Seeding data...")
+    """TRUNCATE puis réinsère merchants/customers/payment_methods depuis zéro. Reset complet, pas d'ajout incrémental."""
+    print("Seeding data...")
     with psycopg2.connect(**PG_CONFIG) as conn:
         with conn.cursor() as cur:
             # Reset complet pour éviter les biais de runs précédents pendant la démo.
@@ -172,19 +166,19 @@ def main():
 
             # Count check
             cur.execute("SELECT count(*) FROM merchants")
-            print(f"  ✓ Merchants: {cur.fetchone()[0]}")
+            print(f"  [OK] Merchants: {cur.fetchone()[0]}")
             cur.execute("SELECT count(*) FROM customers")
-            print(f"  ✓ Customers: {cur.fetchone()[0]}")
+            print(f"  [OK] Customers: {cur.fetchone()[0]}")
             cur.execute("SELECT count(*) FROM payment_methods")
-            print(f"  ✓ Payment methods: {cur.fetchone()[0]}")
+            print(f"  [OK] Payment methods: {cur.fetchone()[0]}")
 
         conn.commit()
-    print("✅ Seed terminé")
+    print("[OK] Seed terminé")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ Erreur seed: {e}", file=sys.stderr)
+        print(f"[ERROR] Erreur seed: {e}", file=sys.stderr)
         sys.exit(1)

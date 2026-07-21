@@ -8,7 +8,7 @@
 
 ---
 
-## 📑 Table des matières — Liens rapides
+## Table des matières — Liens rapides
 
 ### 1. Vue d'ensemble
 - [1.1 — Pitch en 30 secondes](#11--pitch-en-30-secondes)
@@ -55,7 +55,7 @@
 - [5.4 — Pattern de log formaté](#54--pattern-de-log-formaté)
 - [5.5 — Pattern de signal handler](#55--pattern-de-signal-handler-gracieux)
 
-### 6. 🆕 Template pour nouveau fichier
+### 6. Template pour nouveau fichier
 - [6.1 — Checklist avant création](#61--checklist-avant-création)
 - [6.2 — Template Python (producer / consumer / job)](#62--template-python-producer--consumer--job)
 - [6.3 — Template Python (script SQL/DDL/Mongo)](#63--template-python-script-sqlddlmongo)
@@ -234,7 +234,7 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | `fraud_scoring_job.py` | Stream job | **Job prod** PyFlink DataStream (équivalent du flink-like) | [→](../flink/fraud_scoring_job.py) |
 | `requirements.txt` | Dépendances | Déps PyFlink (différent de la racine) | [→](../flink/requirements.txt) |
 
-> ℹ️ Le profil `flink` n'est **pas activé en démo** (ARM64 Mac → bugs de build). En démo on utilise
+> Le profil `flink` n'est **pas activé en démo** (ARM64 Mac → bugs de build). En démo on utilise
 > le `flink_like_job.py` qui a la même logique métier.
 
 ### 3.4 — `dashboard/` — Streamlit
@@ -301,7 +301,7 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 
 ### 3.13 — `data/` — Volumes Docker
 
-> ⚠️ Ne **jamais** éditer à la main. C'est ce que Docker monte pour les services :
+> Ne **jamais** éditer à la main. C'est ce que Docker monte pour les services :
 > - `data/postgres/` → données PG (volume postgres-data bind-mounté)
 > - `data/mongo/` → données Mongo (volume mongo-data)
 > - `data/redis/` → AOF + RDB Redis
@@ -531,7 +531,7 @@ sys.path.insert(0, str(_P(__file__).resolve().parent.parent if _P(__file__).pare
 import _env  # noqa: F401
 ```
 
-> 💡 **Pourquoi pas un `common/env.py` ?** Parce que ce `sys.path.insert(0, ...)` ne marche
+> **Pourquoi pas un `common/env.py` ?** Parce que ce `sys.path.insert(0, ...)` ne marche
 > pas toujours quand le script est lancé depuis un autre CWD. `_env.py` à la racine est
 > trouvable par n'importe quel script.
 
@@ -576,7 +576,7 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ Erreur {context}: {e}", file=sys.stderr)
+        print(f"[ERROR] Erreur {context}: {e}", file=sys.stderr)
         sys.exit(1)
 ```
 
@@ -595,17 +595,16 @@ except Exception as e:
 
 ### 5.4 — Pattern de log formaté
 
-Tous les scripts utilisent des préfixes visuels :
-- `✅` succès
-- `❌` erreur fatale
-- `⚠️` avertissement non-bloquant
-- `⏳` attente
-- `🚀` démarrage
-- `⏹️` arrêt
-- `  → ` sous-étape
-- `  ✓ ` sous-étape OK
+Tous les scripts utilisent des préfixes texte en majuscules entre crochets (pas d'emoji, pour rester lisible en CI/audit) :
+- `[OK]` succès
+- `[ERROR]` erreur fatale
+- `[WARN]` avertissement non-bloquant
+- `[WAIT]` attente
+- `[START]` démarrage
+- `[STOP]` arrêt
+- `[INFO]` information
+- `  → ` sous-étape (flèche conservée pour décrire un flux/une transition)
 - `  [DLQ]` message envoyé en DLQ
-- `  [WARN]` avertissement
 - `  [BURST]` burst de fraude détecté
 
 Format typique : `f"  [{count:6d} txns, {fraud:4d} fraud] rate={rate:.1f}/s"`
@@ -619,7 +618,7 @@ _running = True
 
 def signal_handler(sig, frame):
     global _running
-    print("\n⏹️  Stopping {nom}...")
+    print("\n[STOP] Stopping {nom}...")
     _running = False
 
 signal.signal(signal.SIGINT, signal_handler)
@@ -631,11 +630,11 @@ while _running:
     # Sortie gracieuse à la fin de l'itération
 ```
 
-> ⚠️ Ne **jamais** faire de `time.sleep(60)` en dehors de la condition `if _running:`.
+> Ne **jamais** faire de `time.sleep(60)` en dehors de la condition `if _running:`.
 
 ---
 
-## 6. 🆕 Template pour nouveau fichier
+## 6. Template pour nouveau fichier
 
 ### 6.1 — Checklist avant création
 
@@ -696,7 +695,7 @@ _running = True
 def signal_handler(sig, frame):
     """Gère l'interruption du script (Ctrl+C ou SIGTERM) pour un arrêt gracieux."""
     global _running
-    print("\n⏹️  Stopping {nom}...")
+    print("\n[STOP] Stopping {nom}...")
     _running = False
 
 
@@ -716,7 +715,7 @@ def connect_redis():
         r.ping()
         return r
     except redis.RedisError as e:
-        print(f"❌ Redis connection failed: {e}")
+        print(f"[ERROR] Redis connection failed: {e}")
         sys.exit(1)
 
 
@@ -743,7 +742,7 @@ def main():
     3. Traite chaque message.
     4. Stats tous les N.
     """
-    print(f"🚀 {NOM_DU_FICHIER} started")
+    print(f"[START] {NOM_DU_FICHIER} started")
     r = connect_redis()
 
     count = 0
@@ -757,14 +756,14 @@ def main():
             rate = count / (time.time() - start)
             print(f"  [{count:6d}] rate={rate:.1f}/s")
 
-    print(f"✅ Stopped: {count} processed")
+    print(f"[OK] Stopped: {count} processed")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ Erreur {nom}: {e}", file=sys.stderr)
+        print(f"[ERROR] Erreur {nom}: {e}", file=sys.stderr)
         sys.exit(1)
 ```
 
@@ -809,11 +808,11 @@ def run_action(conn):
 
 def main():
     """Point d'entrée principal."""
-    print(f"🚀 {NOM} started")
+    print(f"[START] {NOM} started")
     conn = connect()
     try:
         run_action(conn)
-        print(f"✅ {NOM} terminé")
+        print(f"[OK] {NOM} terminé")
     finally:
         conn.close()
 
@@ -834,19 +833,19 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 # Charge .env
 if [ ! -f "$PROJECT_ROOT/.env" ]; then
-    echo "❌ .env manquant. Lance : make init-env"
+    echo "[ERROR] .env manquant. Lance : make init-env"
     exit 1
 fi
 set -a
 source "$PROJECT_ROOT/.env"
 set +a
 
-echo "🚀 {NOM} started..."
+echo "[START] {NOM} started..."
 
 # ── Étapes ────────────────────────────────────────────────────────────────────
 # ...
 
-echo "✅ {NOM} terminé"
+echo "[OK] {NOM} terminé"
 ```
 
 ### 6.5 — Template SQL (init)
@@ -898,7 +897,7 @@ CREATE INDEX idx_xxx ON table_name (column);
 }
 ```
 
-> ⚠️ **JAMAIS** de secret en dur dans le JSON. Substituer via le script bash avec un heredoc Python.
+> **JAMAIS** de secret en dur dans le JSON. Substituer via le script bash avec un heredoc Python.
 
 ---
 
@@ -980,7 +979,7 @@ rm -rf venv/
 
 ---
 
-## 📌 Notes finales
+## Notes finales
 
 - **Mainteneur** : Patrice Duclos (RNCP 38777 Architecte en IA)
 - **Date de dernière mise à jour** : 2026-07-13

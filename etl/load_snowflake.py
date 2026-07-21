@@ -19,7 +19,7 @@ try:
     from psycopg2.extras import RealDictCursor
     import snowflake.connector
 except ImportError as e:
-    print(f"❌ Dépendance manquante : {e}")
+    print(f"[ERROR] Dépendance manquante : {e}")
     sys.exit(1)
 
 PG_CONFIG = dict(
@@ -138,7 +138,7 @@ def load_to_snowflake(rows, target_date: date):
         target_date (date): La date de traitement (pour l'affichage/log).
     """
     if not SF_ACCOUNT:
-        print("⚠️  SNOWFLAKE_ACCOUNT non défini — export simulé (dry-run)")
+        print("[WARN] SNOWFLAKE_ACCOUNT non défini — export simulé (dry-run)")
         print(f"   {len(rows)} lignes SERAIENT chargées pour {target_date}")
         return
 
@@ -217,7 +217,7 @@ def load_to_snowflake(rows, target_date: date):
     sf.commit()
     cur.close()
     sf.close()
-    print(f"✅ {loaded} transactions chargées dans Snowflake pour {target_date}")
+    print(f"[OK] {loaded} transactions chargées dans Snowflake pour {target_date}")
 
 
 def main():
@@ -227,20 +227,20 @@ def main():
     et le chargement des faits dans Snowflake. Conçu pour être exécuté quotidiennement.
     """
     target = date.today()
-    print(f"🚀 ETL PostgreSQL → Snowflake — {target}")
+    print(f"[START] ETL PostgreSQL → Snowflake — {target}")
     print(f"   Source : {PG_CONFIG['host']}/{PG_CONFIG['dbname']}")
     print(f"   Cible  : {SF_DB}.{SF_SCHEMA}.fact_transactions")
     print()
 
-    print("📤 Extraction depuis PostgreSQL...")
+    print("Extraction depuis PostgreSQL...")
     rows = extract_from_pg(target)
     print(f"  → {len(rows)} transactions succeeded pour {target}")
 
     if not rows:
-        print("ℹ️  Aucune transaction à charger — le producer tourne-t-il ?")
+        print("[INFO] Aucune transaction à charger — le producer tourne-t-il ?")
         return
 
-    print("📥 Chargement vers Snowflake...")
+    print("Chargement vers Snowflake...")
     load_to_snowflake(rows, target)
 
 

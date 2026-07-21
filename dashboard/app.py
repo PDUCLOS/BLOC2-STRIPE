@@ -52,7 +52,7 @@ FRAUD_THRESHOLD = float(os.environ.get("FRAUD_SCORE_THRESHOLD", 0.85))
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Stripe Polyglot — Dashboard",
-    page_icon="💳",
+    page_icon=":credit_card:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -73,11 +73,7 @@ st.markdown("""
 # des états obsolètes trop longtemps pendant la démo en temps réel.
 @st.cache_resource(ttl=3)
 def get_pg():
-    """Initialise et met en cache la connexion à PostgreSQL.
-    
-    Returns:
-        psycopg2.extensions.connection ou None si échec.
-    """
+    """None si Postgres n'est pas dispo — l'UI affiche l'état "en attente" plutôt que de crasher."""
     try:
         return psycopg2.connect(**PG_CONFIG)
     except Exception:
@@ -85,11 +81,7 @@ def get_pg():
 
 @st.cache_resource(ttl=3)
 def get_redis():
-    """Initialise et met en cache la connexion à Redis.
-    
-    Returns:
-        redis.Redis ou None si échec.
-    """
+    """Idem get_pg, mais pour Redis (avec ping pour vérifier que la connexion tient vraiment)."""
     try:
         r = redis.Redis(**REDIS_CONFIG)
         r.ping()
@@ -99,11 +91,7 @@ def get_redis():
 
 @st.cache_resource(ttl=3)
 def get_mongo():
-    """Initialise et met en cache la connexion à MongoDB.
-    
-    Returns:
-        pymongo.collection.Collection ou None si échec.
-    """
+    """Construit l'URI selon qu'on a des credentials ou pas, ping pour valider, renvoie la db directement."""
     try:
         if MONGO_CONFIG["user"] and MONGO_CONFIG["password"]:
             uri = f"mongodb://{MONGO_CONFIG['user']}:{MONGO_CONFIG['password']}@{MONGO_CONFIG['host']}:{MONGO_CONFIG['port']}/"
@@ -286,22 +274,22 @@ with st.sidebar:
     st.divider()
 
     # Status des services
-    st.subheader("🔌 Services")
+    st.subheader("Services")
     # Vérification "best effort" de disponibilité des services pour feedback instantané.
     pg_ok = get_pg() is not None and not get_pg().closed
     redis_ok = get_redis() is not None
     mongo_ok = get_mongo() is not None
 
-    st.markdown(f"{'🟢' if pg_ok else '🔴'} **PostgreSQL** (OLTP)")
-    st.markdown(f"{'🟢' if redis_ok else '🔴'} **Redis** (feature store)")
-    st.markdown(f"{'🟢' if mongo_ok else '🔴'} **MongoDB** (logs/alertes)")
+    st.markdown(f"**[{'OK' if pg_ok else 'DOWN'}]** **PostgreSQL** (OLTP)")
+    st.markdown(f"**[{'OK' if redis_ok else 'DOWN'}]** **Redis** (feature store)")
+    st.markdown(f"**[{'OK' if mongo_ok else 'DOWN'}]** **MongoDB** (logs/alertes)")
     st.divider()
 
     st.caption("Stack : PostgreSQL 16 · MongoDB 7 · Kafka KRaft · Debezium 2.6 · Redis 7")
     st.caption("Pipeline : CDC → Kafka → Flink-like scorer → MongoDB")
 
 # ── HEADER ─────────────────────────────────────────────────────────────────────
-st.title("💳 Stripe Polyglot — Dashboard Temps Réel")
+st.title("Stripe Polyglot — Dashboard Temps Réel")
 st.caption(f"Dernière mise à jour : {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
 # ── KPIs ───────────────────────────────────────────────────────────────────────
@@ -311,13 +299,13 @@ st.caption(f"Dernière mise à jour : {datetime.now(timezone.utc).strftime('%H:%
 kpis = kpis_from_pg()
 if kpis:
     col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("🔄 Transactions totales", f"{kpis['total']:,}")
-    col2.metric("⚡ Txns (1h)", f"{kpis['txns_1h']:,}")
-    col3.metric("💶 Revenus", f"{kpis['revenue_eur']:,.0f} €")
-    col4.metric("⚠️ Alertes fraude", f"{kpis['fraud_count']:,}", delta=f"{kpis['fraud_rate']}% du volume", delta_color="inverse")
-    col5.metric("📊 Score fraude moyen", f"{kpis['avg_score']:.3f}")
+    col1.metric("Transactions totales", f"{kpis['total']:,}")
+    col2.metric("Txns (1h)", f"{kpis['txns_1h']:,}")
+    col3.metric("Revenus", f"{kpis['revenue_eur']:,.0f} €")
+    col4.metric("Alertes fraude", f"{kpis['fraud_count']:,}", delta=f"{kpis['fraud_rate']}% du volume", delta_color="inverse")
+    col5.metric("Score fraude moyen", f"{kpis['avg_score']:.3f}")
 else:
-    st.warning("⏳ PostgreSQL pas encore disponible — lance `make up` puis `make seed`")
+    st.warning("PostgreSQL pas encore disponible — lance `make up` puis `make seed`")
 
 st.divider()
 
@@ -328,7 +316,7 @@ st.divider()
 col_left, col_right = st.columns([2, 1])
 
 with col_left:
-    st.subheader("📈 Transactions & Fraude — 30 dernières minutes")
+    st.subheader("Transactions & Fraude — 30 dernières minutes")
     df_time = txn_over_time()
     if not df_time.empty and "minute" in df_time.columns:
         df_time["minute"] = pd.to_datetime(df_time["minute"])
@@ -354,7 +342,7 @@ with col_left:
         st.info("En attente de données... Lance le producer : `make producer`")
 
 with col_right:
-    st.subheader("🌍 Fraude par pays")
+    st.subheader("Fraude par pays")
     df_geo = fraud_by_country()
     if not df_geo.empty:
         fig_geo = px.bar(
@@ -382,7 +370,7 @@ st.divider()
 col_merch, col_alerts = st.columns([1, 1])
 
 with col_merch:
-    st.subheader("🏪 Top marchands (GMV)")
+    st.subheader("Top marchands (GMV)")
     df_merch = top_merchants()
     if not df_merch.empty:
         fig_merch = px.bar(
@@ -403,13 +391,13 @@ with col_merch:
         st.info("Aucun marchand — lance `make seed`")
 
 with col_alerts:
-    st.subheader("🚨 Alertes MongoDB (review/block)")
+    st.subheader("Alertes MongoDB (review/block)")
     alerts = fraud_alerts_mongo(10)
     if alerts:
         for a in alerts:
             decision = a.get("decision", "?")
             # Mapping visuel simple pour différencier immédiatement review vs block.
-            color = "🔴" if decision == "block" else "🟡"
+            color = "[BLOCK]" if decision == "block" else "[REVIEW]"
             amount = (a.get("amount") or 0) / 100
             score = a.get("fraud_score", 0)
             country = a.get("ip_country", "?")
@@ -433,7 +421,7 @@ st.divider()
 # NOTE SOUTENANCE : terminer par cette table pour la traçabilité transactionnelle.
 # Elle permet d'illustrer qu'une alerte est explicable (score, pays, device, horodatage),
 # ce qui renforce le discours conformité/auditabilité.
-st.subheader("🔍 Transactions suspectes récentes (score ≥ 0.6)")
+st.subheader("Transactions suspectes récentes (score ≥ 0.6)")
 df_sus = recent_suspicious()
 if not df_sus.empty:
     # Conserve la logique de coloration pour un futur .style.applymap ; non activé
@@ -466,7 +454,7 @@ st.divider()
 # ── ARCHITECTURE ───────────────────────────────────────────────────────────────
 # NOTE SOUTENANCE : ouvrir cet expander en fin de démo pour reconnecter les visuels
 # au pipeline complet (OLTP -> CDC -> Kafka -> scoring -> NoSQL -> OLAP).
-with st.expander("🏗️ Architecture — Pipeline de traitement", expanded=False):
+with st.expander("Architecture — Pipeline de traitement", expanded=False):
     st.markdown("""
 ```
 API Stripe

@@ -16,14 +16,14 @@ import _env  # noqa: F401
 REQUIRED = ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER", "SNOWFLAKE_PASSWORD"]
 missing = [v for v in REQUIRED if not os.environ.get(v)]
 if missing:
-    print(f"❌ Variables manquantes dans .env : {', '.join(missing)}")
+    print(f"[ERROR] Variables manquantes dans .env : {', '.join(missing)}")
     print("   Crée un compte trial sur https://signup.snowflake.com/ et remplis .env")
     sys.exit(1)
 
 try:
     import snowflake.connector
 except ImportError:
-    print("❌ snowflake-connector-python manquant — pip install snowflake-connector-python")
+    print("[ERROR] snowflake-connector-python manquant — pip install snowflake-connector-python")
     sys.exit(1)
 
 ACCOUNT   = os.environ["SNOWFLAKE_ACCOUNT"]
@@ -46,31 +46,25 @@ def run(cur, sql, label=""):
         # Centraliser l'exécution ici garantit un logging homogène de toutes les étapes DDL.
         cur.execute(sql)
         if label:
-            print(f"  ✓ {label}")
+            print(f"  [OK] {label}")
     except snowflake.connector.errors.ProgrammingError as e:
         if "already exists" in str(e).lower():
             if label:
-                print(f"  ↩ {label} (existe déjà)")
+                print(f"  [SKIP] {label} (existe déjà)")
         else:
             raise
 
 
 def main():
-    """Point d'entrée principal pour la configuration de Snowflake.
-    
-    1. Se connecte à Snowflake avec les identifiants fournis dans l'environnement.
-    2. Crée de manière idempotente le warehouse, la base de données et le schéma.
-    3. Crée les tables de dimensions (dim_date, dim_merchants, etc.) et la table de faits (fact_transactions).
-    4. Pré-remplit les dimensions fixes (dim_date, dim_geography) si elles sont vides.
-    """
-    print(f"🔌 Connexion à Snowflake ({ACCOUNT})...")
+    """Crée warehouse + DB + schéma + tables (star schema), puis pré-remplit dim_date/dim_geography. Idempotent, safe à relancer."""
+    print(f"Connexion à Snowflake ({ACCOUNT})...")
     conn = snowflake.connector.connect(
         account=ACCOUNT, user=USER, password=PASSWORD,
     )
     cur = conn.cursor()
-    print("✅ Connecté")
+    print("[OK] Connecté")
 
-    print("\n📦 Création du warehouse...")
+    print("\nCréation du warehouse...")
     run(cur, f"""
         CREATE WAREHOUSE IF NOT EXISTS {WAREHOUSE}
             WAREHOUSE_SIZE = 'X-SMALL'
@@ -81,14 +75,14 @@ def main():
 
     cur.execute(f"USE WAREHOUSE {WAREHOUSE}")
 
-    print("\n🗄️  Création de la base de données...")
+    print("\nCréation de la base de données...")
     run(cur, f"CREATE DATABASE IF NOT EXISTS {DATABASE}", f"Database {DATABASE}")
     cur.execute(f"USE DATABASE {DATABASE}")
 
     run(cur, f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}", f"Schema {SCHEMA}")
     cur.execute(f"USE SCHEMA {SCHEMA}")
 
-    print("\n📐 Création des dimensions...")
+    print("\nCréation des dimensions...")
     # Dimensions séparées pour garder des faits compacts et faciliter les agrégations BI.
 
     run(cur, """
@@ -149,7 +143,7 @@ def main():
         )
     """, "Table dim_geography")
 
-    print("\n⭐ Création de la table de faits...")
+    print("\nCréation de la table de faits...")
     run(cur, f"""
         CREATE TABLE IF NOT EXISTS fact_transactions (
             txn_key        NUMBER AUTOINCREMENT  NOT NULL PRIMARY KEY,
@@ -174,7 +168,7 @@ def main():
 
     # Le clustering date+merchant accélère les filtres temporels et les top marchands.
 
-    print("\n📅 Pré-peuplement de dim_date (2020-2030)...")
+    print("\nPré-peuplement de dim_date (2020-2030)...")
     cur.execute("SELECT COUNT(*) FROM dim_date")
     count = cur.fetchone()[0]
     if count == 0:
@@ -194,11 +188,11 @@ def main():
                 FROM TABLE(GENERATOR(ROWCOUNT => 3653))
             )
         """)
-        print("  ✓ dim_date peuplée (2020→2029)")
+        print("  [OK] dim_date peuplée (2020→2029)")
     else:
-        print(f"  ↩ dim_date existe déjà ({count} lignes)")
+        print(f"  [SKIP] dim_date existe déjà ({count} lignes)")
 
-    print("\n🌍 Peuplement de dim_geography...")
+    print("\nPeuplement de dim_geography...")
     cur.execute("SELECT COUNT(*) FROM dim_geography")
     if cur.fetchone()[0] == 0:
         geo_data = [
@@ -224,13 +218,13 @@ def main():
             "INSERT INTO dim_geography (country_code, country_name, region, is_high_risk) VALUES (%s, %s, %s, %s)",
             geo_data
         )
-        print(f"  ✓ dim_geography peuplée ({len(geo_data)} pays)")
+        print(f"  [OK] dim_geography peuplée ({len(geo_data)} pays)")
 
     conn.commit()
     cur.close()
     conn.close()
 
-    print(f"\n✅ Snowflake setup terminé !")
+    print(f"\n[OK] Snowflake setup terminé !")
     print(f"   Warehouse : {WAREHOUSE}")
     print(f"   Database  : {DATABASE}.{SCHEMA}")
     print(f"   Tables    : dim_date, dim_merchant, dim_customer, dim_payment_method, dim_geography, fact_transactions")

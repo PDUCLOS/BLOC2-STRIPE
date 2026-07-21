@@ -13,7 +13,7 @@ set +a
 
 KAFKA_BOOTSTRAP="${KAFKA_BROKERS:-localhost:9092}"
 
-echo "📨 Création des topics Kafka sur $KAFKA_BOOTSTRAP..."
+echo "Création des topics Kafka sur $KAFKA_BOOTSTRAP..."
 
 create_topic() {
   local topic=$1
@@ -37,9 +37,9 @@ create_topic "stripe.fraud.alerts"         3  2592000000  # 30 jours
 create_topic "stripe.etl.dead-letter"      3  -1          # rétention infinie
 
 echo ""
-echo "📋 Topics existants :"
+echo "Topics existants :"
 docker exec stripe-kafka kafka-topics \
   --bootstrap-server "$KAFKA_BOOTSTRAP" --list | grep -E "^stripe\." || echo "(aucun pour l'instant — Debezium les créera au déploiement du connector)"
 
 echo ""
-echo "✅ Topics applicatifs créés"
+echo "[OK] Topics applicatifs créés"

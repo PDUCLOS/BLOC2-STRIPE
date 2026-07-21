@@ -34,14 +34,9 @@ _running = True
 
 
 def signal_handler(sig, frame):
-    """Gère l'interruption du script (Ctrl+C ou SIGTERM) pour un arrêt gracieux.
-    
-    Args:
-        sig: Signal reçu.
-        frame: Frame courante au moment du signal.
-    """
+    """Ctrl+C / SIGTERM -> on laisse la boucle finir son tour au lieu de couper en plein commit."""
     global _running
-    print("\n⏹️  Stopping Mongo writer...")
+    print("\n[STOP] Stopping Mongo writer...")
     _running = False
 
 
@@ -63,15 +58,8 @@ def get_mongo_client():
 
 
 def main():
-    """Point d'entrée principal du writer MongoDB.
-    
-    1. Se connecte à MongoDB et Kafka.
-    2. Lit les événements scorés depuis le topic Kafka `stripe.payments.events`.
-    3. Enregistre toutes les transactions dans la collection `transaction_logs`.
-    4. Enregistre spécifiquement les fraudes détectées (review/block) dans `fraud_alerts`.
-    5. Gère les erreurs de parsing ou d'insertion en les envoyant dans un topic Dead Letter Queue (DLQ).
-    """
-    print(f"🚀 Mongo writer started: Kafka {KAFKA_BROKERS} → Mongo {MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}")
+    """Consomme stripe.payments.events, écrit transaction_logs (+ fraud_alerts si review/block). Les erreurs de parsing/insertion partent en DLQ plutôt que de faire planter la boucle."""
+    print(f"[START] Mongo writer started: Kafka {KAFKA_BROKERS} → Mongo {MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}")
 
     mongo_client = get_mongo_client()
     db = mongo_client[MONGO_DB]
@@ -79,9 +67,9 @@ def main():
     # Ping to verify connection
     try:
         mongo_client.admin.command("ping")
-        print("✅ Connected to MongoDB")
+        print("[OK] Connected to MongoDB")
     except PyMongoError as e:
-        print(f"❌ MongoDB connection failed: {e}")
+        print(f"[ERROR] MongoDB connection failed: {e}")
         sys.exit(1)
 
     # Producer Kafka pour DLQ
@@ -192,7 +180,7 @@ def main():
         if count % 50 == 0:
             print(f"  [{count:6d} txns, {alert_count:4d} alerts, {dlq_count:3d} dlq] processed")
 
-    print(f"✅ Mongo writer stopped: {count} txns, {alert_count} alerts, {dlq_count} dlq")
+    print(f"[OK] Mongo writer stopped: {count} txns, {alert_count} alerts, {dlq_count} dlq")
     consumer.close()
     dlq_producer.flush(5)
     dlq_producer.close()

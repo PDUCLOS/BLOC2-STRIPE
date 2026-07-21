@@ -12,22 +12,22 @@ set +a
 CONNECT_URL="${KAFKA_CONNECT_URL:-http://localhost:8083}"
 CONNECTOR_NAME="stripe-postgres-cdc-v2"
 
-echo " Déploiement du connecteur Debezium sur $CONNECT_URL..."
+echo "Déploiement du connecteur Debezium sur $CONNECT_URL..."
 
 # Vérifie que Kafka Connect est up
 for i in {1..30}; do
   if curl -fsS "$CONNECT_URL/connectors" >/dev/null 2>&1; then
-    echo " Kafka Connect ready"
+    echo "[OK] Kafka Connect ready"
     break
   fi
-  echo "Waiting for Kafka Connect... ($i/30)"
+  echo "[WAIT] Waiting for Kafka Connect... ($i/30)"
   sleep 2
 done
 
 # Vérifie si le connecteur existe déjà
 EXISTING=$(curl -fsS "$CONNECT_URL/connectors" 2>/dev/null | grep -o "$CONNECTOR_NAME" || true)
 if [ -n "$EXISTING" ]; then
-  echo "  Connecteur $CONNECTOR_NAME existe déjà, status :"
+  echo "[WARN] Connecteur $CONNECTOR_NAME existe déjà, status :"
   curl -fsS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status" | python3 -m json.tool
   exit 0
 fi
@@ -54,11 +54,11 @@ HTTP_CODE=$(curl -s -o /tmp/debezium_response.txt -w "%{http_code}" \
   -d "$CONFIG")
 
 if [ "$HTTP_CODE" = "201" ]; then
-  echo "Connecteur $CONNECTOR_NAME créé"
+  echo "[OK] Connecteur $CONNECTOR_NAME créé"
 elif [ "$HTTP_CODE" = "409" ]; then
-  echo "Connecteur existe déjà (409 Conflict)"
+  echo "[WARN] Connecteur existe déjà (409 Conflict)"
 else
-  echo "Échec création connecteur (HTTP $HTTP_CODE)"
+  echo "[ERROR] Échec création connecteur (HTTP $HTTP_CODE)"
   cat /tmp/debezium_response.txt
   exit 1
 fi

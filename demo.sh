@@ -14,13 +14,13 @@ echo ""
 
 # 1. Init env si manquant
 if [ ! -f .env ]; then
-    echo "🔑 Génération du .env..."
+    echo "Génération du .env..."
     bash scripts/init_env.sh
 fi
 
 # 2. venv
 if [ ! -d venv ]; then
-    echo "🐍 Création du venv Python 3.11..."
+    echo "Création du venv Python 3.11..."
     /opt/homebrew/bin/python3.11 -m venv venv
     ./venv/bin/pip install --upgrade pip > /dev/null 2>&1
     ./venv/bin/pip install -r requirements.txt
@@ -33,17 +33,17 @@ source .env
 set +a
 
 # 3. Démarre les services Docker
-echo "🐳 Démarrage des services Docker..."
+echo "Démarrage des services Docker..."
 docker compose --env-file .env up -d postgres redis mongo kafka debezium 2>&1 | tail -3
 
 # 4. Attendre que tous les services soient healthy
-echo "⏳ Attente des services healthy..."
+echo "Attente des services healthy..."
 for i in {1..30}; do
     # Debezium peut être "starting" plus longtemps au premier boot;
     # on exige un minimum de services healthy avant de continuer.
     HEALTHY=$(docker compose --env-file .env ps --format json 2>/dev/null | grep -c '"Health":"healthy"' || echo 0)
     if [ "$HEALTHY" -ge 4 ]; then
-        echo "✅ Services ready"
+        echo "[OK] Services ready"
         break
     fi
     sleep 2
@@ -51,7 +51,7 @@ for i in {1..30}; do
 done
 
 # 5. Init Kafka topics + Debezium
-echo "📨 Topics Kafka + Debezium connector..."
+echo "Topics Kafka + Debezium connector..."
 bash scripts/create_topics.sh > /dev/null 2>&1
 bash scripts/postgres_init_roles.sh > /dev/null 2>&1
 bash scripts/deploy_debezium.sh > /dev/null 2>&1
@@ -59,10 +59,10 @@ bash scripts/deploy_debezium.sh > /dev/null 2>&1
 # 6. Seed si nécessaire
 COUNT=$(./venv/bin/python -c "import psycopg2, os; c=psycopg2.connect(host=os.environ['PG_HOST'], dbname=os.environ['PG_DB'], user=os.environ['PG_USER'], password=os.environ['PG_PASSWORD']); cur=c.cursor(); cur.execute('SELECT count(*) FROM merchants'); print(cur.fetchone()[0])")
 if [ "$COUNT" -lt 100 ]; then
-    echo "🌱 Seed des données (200 merchants, 5000 customers)..."
+    echo "Seed des données (200 merchants, 5000 customers)..."
     ./venv/bin/python seed/seed_data.py 2>&1 | tail -5
 else
-    echo "✅ Seed déjà fait ($COUNT merchants)"
+    echo "[OK] Seed déjà fait ($COUNT merchants)"
 fi
 
 # 7. Clean Mongo pour la démo
@@ -76,7 +76,7 @@ sleep 2
 
 # 9. Lance le pipeline (en background)
 echo ""
-echo "🚀 Lancement du pipeline..."
+echo "Lancement du pipeline..."
 echo ""
 
 # Logs redirigés dans /tmp pour conserver un terminal propre pendant la soutenance.
@@ -97,11 +97,11 @@ sleep 3
 
 echo ""
 echo "═══════════════════════════════════════════════════════════"
-echo "  ✅ DÉMO PRÊTE !"
+echo "  [OK] DÉMO PRÊTE !"
 echo "═══════════════════════════════════════════════════════════"
 echo ""
-echo "  📊 Dashboard :     http://localhost:8501"
-echo "  🔌 Kafka Connect : http://localhost:8083"
+echo "  Dashboard :     http://localhost:8501"
+echo "  Kafka Connect : http://localhost:8083"
 echo ""
 echo "  Pour lancer le producer de transactions :"
 echo "    ./venv/bin/python producers/transaction_producer.py --rate 3"

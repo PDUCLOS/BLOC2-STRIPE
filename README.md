@@ -4,7 +4,7 @@
 
 **Commentaire précis** : ce README sert de script de démonstration technique. L'ordre des sections suit le parcours réel d'exécution (quickstart -> pipeline live -> vérifications -> tests).
 
-## ⚡ Quickstart
+## Quickstart
 
 ```bash
 git clone https://github.com/<ton-user>/<ton-repo>.git
@@ -18,7 +18,7 @@ Prérequis : Docker Desktop ≥ 24, Python 3.11, ~10 Go de disque, 8 Go de RAM (
 
 **Commentaire précis** : si la machine a moins de 16 Go RAM, fermer les apps lourdes avant `./demo.sh` pour éviter les ralentissements Kafka/Streamlit.
 
-## 🎬 Démo rapide (pour la vidéo)
+## Démo rapide (pour la vidéo)
 
 ```bash
 # 1. Tout démarre en 1 commande (le pipeline complet, y compris les consumers)
@@ -39,7 +39,7 @@ Le script `demo.sh` :
 
 **Commentaire précis** : l'intérêt principal de `demo.sh` est de garantir un démarrage reproductible pour la soutenance, sans oublis de dépendances intermédiaires.
 
-## 🚀 Démarrage manuel (étape par étape)
+## Démarrage manuel (étape par étape)
 
 ```bash
 # 1. Initialise l'environnement local et génère les secrets de base utilisés par les services
@@ -69,7 +69,7 @@ make producer          # 5 txn/s, 5% fraude (terminal 1)
 make dashboard         # Streamlit sur :8501 (terminal 4)
 ```
 
-## 📺 URLs utiles (pour la démo)
+## URLs utiles (pour la démo)
 
 | Service | URL | Credentials |
 |---|---|---|
@@ -80,7 +80,7 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 | MongoDB | `localhost:27017` | `admin` / (voir .env) |
 | Redis | `localhost:6379` | (voir .env) |
 
-## 🏗️ Architecture
+## Architecture
 
 **Commentaire précis** : le flux critique est `PostgreSQL -> Debezium -> Kafka -> scoring -> Mongo/Redis`, qui matérialise la séparation OLTP (transactionnel) et NoSQL (lecture analytique temps réel).
 
@@ -134,7 +134,7 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
    └─────────────────────────────────────────────────────────────┘
 ```
 
-## 📁 Structure
+## Structure
 
 ```
 .
@@ -158,7 +158,7 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 └── flink/                    # Dockerfile + requirements (PyFlink custom)
 ```
 
-## 🎯 Scénario de démo (3 minutes)
+## Scénario de démo (3 minutes)
 
 **Commentaire précis** : ce scénario est ordonné pour prouver d'abord la fiabilité technique (services, flux, tests), puis la valeur métier (dashboard et alertes fraude).
 
@@ -178,7 +178,7 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 6. **Test E2E (15s)** : `make test` pour montrer que le parcours complet est vérifiable automatiquement.
 7. **Snowflake (optionnel, 30s)** : si les credentials sont renseignés dans `.env`, lancer `make snowflake-export` pour montrer l'étape analytique batch.
 
-## ⚠️ Notes techniques
+## Notes techniques
 
 ### Pourquoi pas de vrai Flink custom image ?
 
@@ -195,7 +195,7 @@ J'ai tenté de builder une image Flink custom (PyFlink + connecteur Kafka + Redi
 
 Le broker Kafka a 2 listeners : `PLAINTEXT://kafka:9092` (inter-container) et `PLAINTEXT_HOST://localhost:29092` (host). Le port mapping `29092:29092` rend le 2e accessible depuis ton Mac.
 
-## 🔧 Commandes utiles
+## Commandes utiles
 
 **Commentaire précis** : ces commandes sont pensées pour diagnostiquer rapidement les 4 zones à risque pendant la démo : Kafka (topics), Debezium (CDC), Mongo (persist), Redis (features).
 
@@ -224,7 +224,7 @@ docker logs stripe-debezium --tail 50
 make status
 ```
 
-## 🧪 Tests
+## Tests
 
 ```bash
 # Test E2E complet (5 étapes)
@@ -236,14 +236,14 @@ make smoke
 
 **Commentaire précis** : exécuter `make test` avant la présentation permet de prouver l'intégrité end-to-end sans dépendre uniquement d'une démonstration visuelle.
 
-## 📋 Prérequis
+## Prérequis
 
 - Docker Desktop (>= 24.0)
 - Python 3.11 (`brew install python@3.11`)
 - 8-10 Go d'espace disque
 - 8 Go de RAM minimum (recommandé 16+)
 
-## 🎁 Snowflake (optionnel)
+## Snowflake (optionnel)
 
 Pour activer l'export batch vers Snowflake :
 1. Crée un compte trial sur https://signup.snowflake.com (Standard, AWS, eu-west-1)
