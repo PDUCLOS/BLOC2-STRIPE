@@ -210,7 +210,7 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | `ARCHITECTURE.md` (ce fichier) | Doc | Doc technique détaillée | [→](./ARCHITECTURE.md) |
 | `PRESENTATION.md` | Doc | Slides de présentation soutenance | [→](./PRESENTATION.md) |
 | `Makefile` | Build | Orchestration : `make init`, `up`, `down`, `seed`, `producer`, `dashboard`, `test`, `flink`, `snowflake-*` | [→](../Makefile) |
-| `docker-compose.yml` | Infra | 7 services : postgres, mongo, kafka, debezium, redis, flink-jm/tm (profil `flink`) | [→](../docker-compose.yml) |
+| `docker-compose.yml` | Infra | 8 services : postgres, mongo, kafka, debezium, redis, dashboard (Streamlit), flink-jm/tm (profil `flink`) | [→](../docker-compose.yml) |
 | `demo.sh` | Script | Démo one-shot (pour la vidéo) | [→](../demo.sh) |
 | `requirements.txt` | Dépendances | Déps Python locales (producer, dashboard, scripts) | [→](../requirements.txt) |
 | `.env` | Config (gitignored) | Variables d'environnement runtime | [→](../.env) |
@@ -242,6 +242,7 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
 | `app.py` | App web | Dashboard live : KPIs, charts, alertes, transactions suspectes | [→](../dashboard/app.py) |
+| `Dockerfile` | Infra | Image Python 3.11-slim + Streamlit, containerise le dashboard (service `dashboard`, port 8501) | [→](../dashboard/Dockerfile) |
 
 ### 3.5 — `seed/` — Données initiales
 
@@ -921,12 +922,15 @@ CREATE INDEX idx_xxx ON table_name (column);
 | `make flink-build` | Build l'image Flink custom (profil `flink`) |
 | `make flink-submit` | Soumet le job PyFlink |
 | `make flink` | build + submit |
-| `make dashboard` | Lance Streamlit sur :8501 |
+| `make dashboard` | Lance Streamlit sur :8501 (mode host, venv local) |
 | `make snowflake-setup` | Crée warehouse + schéma Snowflake |
 | `make snowflake-export` | Lance l'extract quotidien |
 | `make test` | Lance les tests E2E |
 | `make smoke` | Vérifie que tous les services répondent |
 | `make help` | Affiche l'aide |
+
+> Alternative containerisée du dashboard (sans venv host) :
+> `docker compose up -d --build dashboard` → même URL http://localhost:8501, connecté à postgres/mongo/redis via le réseau Docker interne.
 
 ### 7.2 — Inspection manuelle des services
 

@@ -138,7 +138,7 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 
 ```
 .
-├── docker-compose.yml       # 5 services (Postgres, Mongo, Kafka, Debezium, Redis)
+├── docker-compose.yml       # 6 services (Postgres, Mongo, Kafka, Debezium, Redis, Dashboard)
 ├── Makefile                 # orchestration
 ├── demo.sh                  # script one-shot pour la démo
 ├── .env / .env.example      # config (gitignored .env)
@@ -150,7 +150,8 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 │   ├── flink_like_job.py          # job scoring fraude (DataStream-style)
 │   └── mongo_writer.py            # Kafka→Mongo consumer
 ├── dashboard/
-│   └── app.py                # app Streamlit (5 pages)
+│   ├── app.py                 # app Streamlit (5 pages)
+│   └── Dockerfile             # image du service `dashboard` (port 8501)
 ├── etl/                      # export batch vers Snowflake
 ├── tests/
 │   └── test_e2e.py           # test end-to-end

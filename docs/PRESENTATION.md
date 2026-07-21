@@ -502,7 +502,7 @@ make smoke
 
 ```
 .
-├── docker-compose.yml            # 5 services actifs (Postgres, Mongo, Kafka, Debezium, Redis)
+├── docker-compose.yml            # 6 services actifs (Postgres, Mongo, Kafka, Debezium, Redis, Dashboard)
 │                                # + 2 services profil "flink" (JobManager, TaskManager)
 ├── Makefile                      # orchestration (up/down/init/seed/producer/test)
 ├── demo.sh                       # one-shot: démarre tout pour la vidéo
@@ -536,7 +536,8 @@ make smoke
 │   └── fraud_scoring_job.py     # version PyFlink DataStream (référence prod)
 │
 ├── dashboard/
-│   └── app.py                   # Streamlit 5 pages
+│   ├── app.py                   # Streamlit 5 pages
+│   └── Dockerfile               # image du service `dashboard` (port 8501)
 │
 ├── etl/
 │   ├── snowflake_setup.py       # crée warehouse + schéma
