@@ -43,7 +43,9 @@ PG_DB = os.environ.get("PG_DB", "stripe_oltp")
 PG_USER = os.environ.get("PG_USER", "stripe_app")
 PG_PASSWORD = os.environ.get("PG_PASSWORD", "")
 FRAUD_THRESHOLD = float(os.environ.get("FRAUD_SCORE_THRESHOLD", 0.85))
-REVIEW_THRESHOLD = 0.6
+# Seuil de revue lu depuis l'environnement, comme FRAUD_SCORE_THRESHOLD, pour
+# rester aligné sur flink/fraud_scoring_job.py (REVIEW_THRESHOLD, défaut 0.60).
+REVIEW_THRESHOLD = float(os.environ.get("REVIEW_SCORE_THRESHOLD", 0.60))
 
 # "rules" (défaut, sûr) ou "ml" pour utiliser le modèle XGBoost entraîné
 # (ml/train_fraud_model.py). Si "ml" est demandé mais qu'aucun modèle n'a
