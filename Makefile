@@ -149,6 +149,14 @@ snowflake-export:
 	@echo "[OK] Export batch vers Snowflake terminé"
 
 # ─────────────────────────────────────────────────────────
+# Machine Learning
+# ─────────────────────────────────────────────────────────
+.PHONY: ml-train
+ml-train:
+	@$(PYTHON) -m ml.train_fraud_model
+	@echo "[OK] Modèle entraîné — active-le avec : export SCORING_ENGINE=ml"
+
+# ─────────────────────────────────────────────────────────
 # Tests
 # ─────────────────────────────────────────────────────────
 .PHONY: test

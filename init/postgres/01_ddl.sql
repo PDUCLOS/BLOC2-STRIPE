@@ -182,3 +182,28 @@ END $$;
 
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO replication_user;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO replication_user;
+
+-- =====================================================================
+-- Rôle analytics_reader (lecture seule, sans accès aux données sensibles)
+-- cf. docs/SECURITY_COMPLIANCE_PLAN.md §3.2
+-- =====================================================================
+
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'analytics_reader') THEN
+        CREATE ROLE analytics_reader WITH LOGIN;
+    END IF;
+END $$;
+
+-- Mot de passe défini par postgres_init_roles.sh, même raison que replication_user.
+
+-- Accès en lecture sur les tables métier sans donnée de paiement sensible.
+GRANT SELECT ON merchants, customers, transactions, refunds, fraud_indicators TO analytics_reader;
+
+-- payment_methods : accès colonne par colonne, fingerprint explicitement exclu
+-- (c'est la seule colonne réellement sensible de la table, même pseudonymisée —
+-- cf. §2 du plan de sécurité). GRANT liste les colonnes autorisées plutôt que
+-- REVOKE une colonne précise, pour que l'ajout d'une future colonne sensible
+-- à payment_methods ne soit pas accessible par défaut à ce rôle.
+GRANT SELECT (pm_id, customer_id, type, brand, last4, is_default, expires_at, created_at)
+    ON payment_methods TO analytics_reader;

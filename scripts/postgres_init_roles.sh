@@ -33,3 +33,23 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO ${PG_REPLICA
 EOF
 
 echo "[OK] replication_user configuré"
+
+# Rôle lecture seule sans accès payment_methods.fingerprint (cf. §3.2 du plan
+# de sécurité) — les privilèges de table sont déjà posés par le DDL init
+# (init/postgres/01_ddl.sql), on ne fait ici que (re)définir le mot de passe.
+if [ -n "${PG_ANALYTICS_USER:-}" ] && [ -n "${PG_ANALYTICS_PASSWORD:-}" ]; then
+  echo "Création du ${PG_ANALYTICS_USER}..."
+  docker exec -i stripe-postgres psql -U "$PG_USER" -d "$PG_DB" <<EOF
+DO \$\$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${PG_ANALYTICS_USER}') THEN
+        CREATE ROLE ${PG_ANALYTICS_USER} WITH LOGIN PASSWORD '${PG_ANALYTICS_PASSWORD}';
+    ELSE
+        ALTER ROLE ${PG_ANALYTICS_USER} WITH PASSWORD '${PG_ANALYTICS_PASSWORD}';
+    END IF;
+END \$\$;
+EOF
+  echo "[OK] ${PG_ANALYTICS_USER} configuré"
+else
+  echo "[SKIP] PG_ANALYTICS_USER/PG_ANALYTICS_PASSWORD absents du .env — analytics_reader non configuré"
+fi

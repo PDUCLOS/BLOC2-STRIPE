@@ -25,8 +25,11 @@ import psycopg2
 # Load .env (via shared helper à la racine du projet)
 import sys
 from pathlib import Path as _P
+# Ajoute la racine du projet au path Python pour que le helper _env soit importable
+# quand le script est lancé directement depuis le dossier producers/.
 sys.path.insert(0, str(_P(__file__).resolve().parent.parent if _P(__file__).parent.name != "tests" else _P(__file__).resolve().parent.parent))
 import _env  # noqa: F401
+# Paramètres de connexion PostgreSQL lus depuis l'environnement préparé par _env.
 PG_CONFIG = {
     "host": os.environ["PG_HOST"],
     "port": int(os.environ.get("PG_PORT", 5432)),
@@ -35,13 +38,19 @@ PG_CONFIG = {
     "password": os.environ["PG_PASSWORD"],
 }
 
+# Référentiels utilisés pour fabriquer des transactions crédibles et variées.
 DEVICE_TYPES = ["mobile", "desktop", "tablet", "pos"]
 CURRENCIES = ["EUR", "USD", "GBP", "JPY", "CAD", "AUD"]
 FRAUD_COUNTRIES = ["RU", "NG", "KP", "IR", "VE"]  # high-risk geo
 NORMAL_COUNTRIES = ["FR", "US", "GB", "DE", "ES", "IT", "NL", "BE", "CA"]
 
+# Flag global contrôlé par les signaux système pour arrêter proprement la boucle.
 _running = True
 
+
+# -----------------------------------------------------------------------------
+# Gestion des signaux et sélection des données
+# -----------------------------------------------------------------------------
 
 def signal_handler(sig, frame):
     """Ctrl+C / SIGTERM : on stoppe après l'itération en cours pour ne pas laisser une transaction à moitié insérée."""
@@ -63,6 +72,7 @@ def pick_merchant(cur):
     Returns:
         L'identifiant du marchand sélectionné (merchant_id).
     """
+    # On répartit les transactions sur les marchands actifs pour simuler un flux réel.
     cur.execute("SELECT merchant_id FROM merchants WHERE status = 'active' ORDER BY random() LIMIT 1")
     return cur.fetchone()[0]
 
@@ -82,6 +92,7 @@ def pick_customer_pm(cur, is_fraud: bool):
     """
     if is_fraud:
         # Cible : nouveaux comptes ou segments inactifs (profil typique de fraude)
+        # On favorise les profils plus risqués pour augmenter la proportion de cas détectables.
         cur.execute("""
             SELECT c.customer_id, pm.pm_id
             FROM customers c
@@ -90,6 +101,7 @@ def pick_customer_pm(cur, is_fraud: bool):
             ORDER BY random() LIMIT 1
         """)
     else:
+        # Cas normal : clients établis avec comportement plus standard.
         cur.execute("""
             SELECT c.customer_id, pm.pm_id
             FROM customers c
@@ -101,11 +113,16 @@ def pick_customer_pm(cur, is_fraud: bool):
     return row if row else (None, None)
 
 
+# -----------------------------------------------------------------------------
+# Construction du payload transaction
+# -----------------------------------------------------------------------------
+
 def build_transaction(is_fraud: bool) -> dict:
     """Build a transaction payload. Fraud patterns:
        - gros montant (>500€) + pays à risque + device mobile inconnu
        - ou petit montant répété (card testing) signalé via metadata
     """
+    # Valeur de départ réaliste pour une transaction ordinaire.
     amount = random.randint(50, 50000)  # centimes, 0.50€ → 500€
     if is_fraud:
         # 70% gros montant, 30% petit (card testing)
@@ -126,6 +143,7 @@ def build_transaction(is_fraud: bool) -> dict:
     if is_fraud and random.random() < 0.3:
         device = "pos"  # atypical device for online fraud
 
+    # Le payload reste volontairement proche du schéma attendu en base.
     return {
         "merchant_id": None,  # filled in main()
         "customer_id": None,
@@ -153,6 +171,7 @@ def insert_transaction(cur, txn: dict):
         cur: Curseur de base de données PostgreSQL.
         txn (dict): Dictionnaire contenant les données de la transaction.
     """
+    # L'INSERT est paramétré pour éviter toute concaténation de chaînes SQL.
     cur.execute("""
         INSERT INTO transactions (
             merchant_id, customer_id, pm_id, amount, currency, status,
@@ -162,6 +181,10 @@ def insert_transaction(cur, txn: dict):
                   %(ip_country)s, %(metadata)s)
     """, txn)
 
+
+# -----------------------------------------------------------------------------
+# Boucle principale de génération
+# -----------------------------------------------------------------------------
 
 def main():
     """Point d'entrée principal du producer.
@@ -183,14 +206,17 @@ def main():
     if args.max_txns:
         print(f"   Will stop after {args.max_txns} transactions")
 
+    # Conversion du débit cible en temps d'attente entre deux insertions.
     sleep_per_txn = 1.0 / args.rate
     count = 0
     fraud_count = 0
+    # Variables de contexte pour simuler une rafale de fraude sur un même compte.
     burst_remaining = 0
     burst_customer_id = None
     burst_pm_id = None
     burst_merchant_id = None
 
+    # Une seule connexion est gardée ouverte pour éviter le coût de reconnexion.
     with psycopg2.connect(**PG_CONFIG) as conn:
         with conn.cursor() as cur:
             while _running:
@@ -214,6 +240,7 @@ def main():
                     txn["merchant_id"] = pick_merchant(cur)
                     customer_id, pm_id = pick_customer_pm(cur, is_fraud)
                     if not customer_id:
+                        # Si aucun profil adéquat n'est trouvé, on saute cette itération.
                         continue
                     txn["customer_id"] = customer_id
                     txn["pm_id"] = pm_id
@@ -229,6 +256,7 @@ def main():
                 insert_transaction(cur, txn)
                 conn.commit()
 
+                # On suit le volume total et le volume frauduleux pour l'affichage console.
                 count += 1
                 if is_fraud:
                     fraud_count += 1
@@ -242,6 +270,7 @@ def main():
                     break
 
                 # Pace — bursts go faster
+                # Les bursts sont volontairement plus rapides pour créer une signature visible.
                 target_sleep = sleep_per_txn * 0.1 if burst_remaining > 0 else sleep_per_txn
                 elapsed = time.time() - loop_start
                 if elapsed < target_sleep:

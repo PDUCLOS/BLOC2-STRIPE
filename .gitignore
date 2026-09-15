@@ -20,6 +20,10 @@ htmlcov/
 # === Données runtime des conteneurs (Postgres, Mongo, Redis, Kafka, Debezium, Flink) ===
 data/
 
+# === Artefacts modèle ML — générés par make ml-train, pas versionnés (cf. docs/ML_INTEGRATION_STRATEGY.md) ===
+ml/models/*.pkl
+ml/models/*.meta.json
+
 # === Logs ===
 *.log
 logs/

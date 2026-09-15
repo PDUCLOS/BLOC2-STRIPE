@@ -29,6 +29,7 @@ PG_CONFIG = dict(
 )
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
+REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or None
 MONGO_URI  = os.environ.get("MONGO_URI", "mongodb://stripe_app:stripe_pass@localhost:27017/stripe_nosql?authSource=admin")
 
 FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))
@@ -220,7 +221,7 @@ def test_pg_amount_bigint():
 def test_redis_connect():
     """Vérifie la connexion de base à Redis via un PING."""
     import redis
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
     assert r.ping(), "Redis PING KO"
     r.close()
 
@@ -228,7 +229,7 @@ def test_redis_connect():
 def test_redis_velocity_write_read():
     """Simule l'écriture d'une vélocité et la relit."""
     import redis
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
     test_customer = f"test-cust-{uuid.uuid4().hex[:8]}"
     now_ts = time.time()
 
@@ -249,7 +250,7 @@ def test_redis_velocity_write_read():
 def test_redis_feature_store():
     """Vérifie le pattern HSET features."""
     import redis
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, password=REDIS_PASSWORD, decode_responses=True)
     key = f"features:test-{uuid.uuid4().hex[:8]}"
 
     r.hset(key, mapping={
@@ -300,7 +301,8 @@ def test_mongo_fraud_alerts_schema():
     if doc is None:
         # Pas d'alerte encore — pas bloquant
         return
-    for field in ["txn_id", "fraud_score", "decision", "timestamp"]:
+    # "created_at", pas "timestamp" — nom du champ tel qu'écrit par mongo_writer.py.
+    for field in ["txn_id", "fraud_score", "decision", "created_at"]:
         assert field in doc, f"Champ '{field}' absent de fraud_alerts"
 
 

@@ -31,12 +31,20 @@ import _env  # noqa: F401 — l'import seul déclenche le chargement du .env
 # Config des 3 datastores lues depuis l'environnement, avec des valeurs par défaut
 # alignées sur docker-compose.yml pour que `streamlit run` marche aussi hors Docker
 # (connexion directe aux ports exposés sur localhost).
+#
+# Le dashboard n'a besoin que d'un accès lecture seule sans les colonnes
+# sensibles de payment_methods (cf. docs/SECURITY_COMPLIANCE_PLAN.md §3.2) :
+# utilise analytics_reader si PG_ANALYTICS_USER/PASSWORD sont renseignés dans
+# .env, sinon retombe sur PG_USER (stripe_app) pour ne pas casser une install
+# existante où le rôle analytics_reader n'a pas encore été créé.
+_PG_USER = os.environ.get("PG_ANALYTICS_USER") or os.environ.get("PG_USER", "stripe_app")
+_PG_PASSWORD = os.environ.get("PG_ANALYTICS_PASSWORD") or os.environ.get("PG_PASSWORD", "")
 PG_CONFIG = dict(
     host=os.environ.get("PG_HOST", "localhost"),
     port=int(os.environ.get("PG_PORT", 5432)),
     dbname=os.environ.get("PG_DB", "stripe_oltp"),
-    user=os.environ.get("PG_USER", "stripe_app"),
-    password=os.environ.get("PG_PASSWORD", ""),
+    user=_PG_USER,
+    password=_PG_PASSWORD,
 )
 REDIS_CONFIG = dict(
     host=os.environ.get("REDIS_HOST", "localhost"),

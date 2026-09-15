@@ -49,6 +49,11 @@ PG_PASSWORD = os.environ.get("PG_PASSWORD", "")
 FRAUD_THRESHOLD = float(os.environ.get("FRAUD_SCORE_THRESHOLD", 0.85))
 REVIEW_THRESHOLD = 0.6
 
+# "rules" (défaut, sûr) ou "ml" pour utiliser le modèle XGBoost entraîné
+# (ml/train_fraud_model.py). Si "ml" est demandé mais qu'aucun modèle n'a
+# encore été entraîné, on retombe automatiquement sur "rules" (cf. score_transaction).
+SCORING_ENGINE = os.environ.get("SCORING_ENGINE", "rules")
+
 # Liste illustrative pour la démo (pays fréquemment cités dans les listes de risque
 # carding/sanctions) — en prod ce serait piloté par un service de scoring pays
 # tiers (ex. MaxMind, Sift) plutôt qu'une liste statique codée en dur.
@@ -124,36 +129,64 @@ def score_transaction(txn, r):
     except redis.RedisError as e:
         print(f"  [WARN] Redis: {e}", file=sys.stderr)
 
-    # Score
-    # Base à 0.1 pour représenter un risque résiduel minimal sur toute transaction.
-    score_val = 0.1
-    rules = []
-
     amount = txn.get("amount", 0) or 0
     country = str(txn.get("ip_country", "") or "")
     device = str(txn.get("device_type", "") or "")
 
-    # Pondérations additives choisies pour que le cumul de 2-3 signaux faibles
-    # franchisse REVIEW_THRESHOLD (0.6), et qu'un signal fort isolé (géo à risque,
-    # montant élevé) s'en approche déjà seul — évite qu'une seule règle domine
-    # totalement la décision.
-    if amount > 100_000:
-        score_val += 0.35
-        rules.append("R1_high_amount")
-    if 0 < amount < 200 and device in ("pos", "mobile"):
-        score_val += 0.15
-        rules.append("R2_card_testing")
-    if country in HIGH_RISK_COUNTRIES:
-        score_val += 0.40
-        rules.append("R3_high_risk_geo")
-    if velocity_1h > 10:
-        score_val += 0.25
-        rules.append("R4_velocity_1h")
-    if velocity_24h > 50:
-        score_val += 0.15
-        rules.append("R5_velocity_24h")
+    model_version = "rule-based-v1"
+    score_val = None
+    rules = []
 
-    score_val = min(round(score_val, 4), 1.0)
+    if SCORING_ENGINE == "ml":
+        # Debezium (ExtractNewRecordState + TIMESTAMPTZ) sérialise created_at
+        # en ISO 8601 — fallback sur l'heure courante si absent/mal formé
+        # plutôt que de faire planter le scoring sur un champ non critique.
+        try:
+            raw_ts = txn.get("created_at")
+            created_at = datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00")) if raw_ts else datetime.now(timezone.utc)
+        except (ValueError, TypeError):
+            created_at = datetime.now(timezone.utc)
+
+        from ml.scoring import score as ml_score
+        ml_result = ml_score(
+            amount=amount, created_at=created_at, ip_country=country,
+            device_type=device, velocity_1h=velocity_1h, velocity_24h=velocity_24h,
+        )
+        if ml_result is not None:
+            score_val = round(ml_result, 4)
+            model_version = "xgboost-v1"
+            # Le modèle ML ne produit pas de règles discrètes déclenchées —
+            # rules_triggered reste vide pour ce model_version (le champ
+            # existe toujours dans le schéma, juste non peuplé côté ML).
+        # else : ml_result is None → modèle pas encore entraîné, on retombe
+        # sur le moteur à règles ci-dessous (pas de branche `else` requise,
+        # score_val reste None et le bloc suivant s'exécute).
+
+    if score_val is None:
+        # Moteur à règles (défaut, et fallback si SCORING_ENGINE=ml sans modèle entraîné).
+        # Base à 0.1 pour représenter un risque résiduel minimal sur toute transaction.
+        score_val = 0.1
+        # Pondérations additives choisies pour que le cumul de 2-3 signaux faibles
+        # franchisse REVIEW_THRESHOLD (0.6), et qu'un signal fort isolé (géo à risque,
+        # montant élevé) s'en approche déjà seul — évite qu'une seule règle domine
+        # totalement la décision.
+        if amount > 100_000:
+            score_val += 0.35
+            rules.append("R1_high_amount")
+        if 0 < amount < 200 and device in ("pos", "mobile"):
+            score_val += 0.15
+            rules.append("R2_card_testing")
+        if country in HIGH_RISK_COUNTRIES:
+            score_val += 0.40
+            rules.append("R3_high_risk_geo")
+        if velocity_1h > 10:
+            score_val += 0.25
+            rules.append("R4_velocity_1h")
+        if velocity_24h > 50:
+            score_val += 0.15
+            rules.append("R5_velocity_24h")
+        score_val = min(round(score_val, 4), 1.0)
+        model_version = "rule-based-v1"
 
     if score_val >= FRAUD_THRESHOLD:
         decision = "block"
@@ -167,7 +200,7 @@ def score_transaction(txn, r):
     txn["velocity_1h"] = velocity_1h
     txn["velocity_24h"] = velocity_24h
     txn["rules_triggered"] = rules
-    txn["model_version"] = "rule-based-v1"
+    txn["model_version"] = model_version
     txn["scored_at"] = datetime.now(timezone.utc).isoformat()
 
     return txn
@@ -179,6 +212,8 @@ def main():
     print(f"[START] Flink-like job started")
     print(f"   Kafka brokers: {KAFKA_BROKERS}")
     print(f"   Redis: {REDIS_HOST}:{REDIS_PORT}")
+    print(f"   Scoring engine: {SCORING_ENGINE}"
+          + (" (fallback auto sur rules si modèle absent)" if SCORING_ENGINE == "ml" else ""))
 
     # Connexion Redis
     r = redis.Redis(

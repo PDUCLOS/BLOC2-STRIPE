@@ -25,6 +25,7 @@ content = p.read_text()
 replacements = {
     "PG_PASSWORD=": f"PG_PASSWORD={secrets.token_urlsafe(24)}",
     "PG_REPLICATION_PASSWORD=": f"PG_REPLICATION_PASSWORD={secrets.token_urlsafe(24)}",
+    "PG_ANALYTICS_PASSWORD=": f"PG_ANALYTICS_PASSWORD={secrets.token_urlsafe(24)}",
     "MONGO_PASSWORD=": f"MONGO_PASSWORD={secrets.token_urlsafe(24)}",
     "MONGO_APP_PASSWORD=": f"MONGO_APP_PASSWORD={secrets.token_urlsafe(24)}",
     "REDIS_PASSWORD=": f"REDIS_PASSWORD={secrets.token_urlsafe(24)}",
