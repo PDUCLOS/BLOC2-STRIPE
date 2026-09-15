@@ -62,7 +62,7 @@
 
 ### 6. Template pour nouveau fichier
 - [6.1 — Checklist avant création](#61--checklist-avant-création)
-- [6.2 — Template Python (producer / consumer / job)](#62--template-python-producer--consumer--job)
+- [6.2 — Template Python (producer / consommateur / job)](#62--template-python-producer--consumer--job)
 - [6.3 — Template Python (script SQL/DDL/Mongo)](#63--template-python-script-sqlddlmongo)
 - [6.4 — Template Bash](#64--template-bash)
 - [6.5 — Template SQL (init)](#65--template-sql-init)
@@ -83,8 +83,8 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 - **OLTP** : PostgreSQL 16 (source de vérité des transactions)
 - **CDC** : Debezium capte chaque INSERT/UPDATE et le pousse dans Kafka
 - **Stream processing** : un job de scoring fraude (PyFlink en prod, "Flink-like" Python en démo) lit Kafka, enrichit avec **Redis** (vélocité + features), calcule un `fraud_score` (règles statiques ou **modèle XGBoost entraîné**, selon `SCORING_ENGINE`), décide `allow / review / block`, et écrit dans 2 topics Kafka.
-- **NoSQL** : un consumer Python lit les transactions scorées et les persiste dans **MongoDB** (`transaction_logs`, `fraud_alerts` avec TTL RGPD 90j, `ml_features`).
-- **ML** : `ml/train_fraud_model.py` entraîne le modèle sur l'historique Postgres et trace le run dans **MLflow** ; `ml-monitor` (Evidently) surveille en continu drift et performance, et redéclenche l'entraînement automatiquement en cas de dérive.
+- **NoSQL** : un consommateur Python lit les transactions scorées et les persiste dans **MongoDB** (`transaction_logs`, `fraud_alerts` avec TTL RGPD 90j, `ml_features`).
+- **ML** : `ml/train_fraud_model.py` entraîne le modèle sur l'historique Postgres et trace le run dans **MLflow** ; `ml-monitor` (Evidently) surveille en continu dérive et performance, et redéclenche l'entraînement automatiquement en cas de dérive.
 - **Visualisation** : un dashboard **Streamlit** live (2 onglets) branche sur PG + Mongo + Redis + les métriques de monitoring ML.
 - **OLAP** : un DAG **Airflow** (ou `make snowflake-export` en manuel) exporte les transactions vers **Snowflake** (star schema : `fact_transactions` + 5 dimensions).
 
@@ -98,9 +98,9 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 | **Stream processing** | PyFlink 1.18 (prod) / Python "flink-like" (démo) | Scoring fraude temps réel |
 | **Feature store online** | Redis 7 | Vélocité 1h/24h, features client |
 | **NoSQL** | MongoDB 7 | Logs, alertes, features ML |
-| **Machine Learning** | XGBoost 2.0 | Modèle de scoring fraude entraîné (fallback règles si absent) |
-| **ML tracking** | MLflow 2.14 | Runs d'entraînement, registre de modèles |
-| **ML monitoring** | Evidently 0.4 | Drift + performance live, réentraînement auto |
+| **Machine Learning** | XGBoost 2.0 | Modèle de scoring fraude entraîné (repli règles si absent) |
+| **ML suivi** | MLflow 2.14 | Runs d'entraînement, registre de modèles |
+| **ML monitoring** | Evidently 0.4 | Dérive + performance live, réentraînement auto |
 | **Visualisation** | Streamlit 1.32 | Dashboard live, 2 onglets (Vue d'ensemble + Performance ML) |
 | **OLAP** | Snowflake | Star schema, batch quotidien |
 | **Orchestration** | Apache Airflow 2.9 (profil optionnel) / Makefile | DAG ETL quotidien |
@@ -110,7 +110,7 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 | Service | URL | Credentials |
 |---|---|---|
 | Streamlit Dashboard | http://localhost:8501 | admin / Bloc2-Demo-2026 (démo locale) |
-| MLflow (tracking + registre) | http://localhost:5001 | — |
+| MLflow (suivi + registre) | http://localhost:5001 | — |
 | Airflow (si profil `airflow`) | http://localhost:8090 | admin / généré au 1er démarrage (`docker logs stripe-airflow`) |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
 | Flink UI (si profil `flink`) | http://localhost:8081 | — |
@@ -193,7 +193,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 | `stripe.public.fraud_indicators` | auto | 168h | Debezium CDC | Indicateurs fraude |
 | `stripe.payments.events` | 12 | 30j | Flink-like sink | Txns scorées (toutes) |
 | `stripe.fraud.alerts` | 3 | 30j | Flink-like sink | Txns avec decision ∈ {review, block} |
-| `stripe.etl.dead-letter` | 3 | ∞ | Tous les consumers | Messages malformés / erreurs de scoring |
+| `stripe.etl.dead-letter` | 3 | ∞ | Tous les consommateurs | Messages malformés / erreurs de scoring |
 
 **Collections MongoDB** (cf. `init/mongo/01_init_collections.js`) :
 
@@ -235,7 +235,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 |---|---|---|---|
 | `transaction_producer.py` | Producer | Génère des transactions continues (5/s, 5% fraude) | [→](../producers/transaction_producer.py) |
 | `flink_like_job.py` | Stream job | **Scoring fraude** temps réel — règles ou modèle ML selon `SCORING_ENGINE` | [→](../producers/flink_like_job.py) |
-| `mongo_writer.py` | Consumer | Lit Kafka `stripe.payments.events` → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`) | [→](../producers/mongo_writer.py) |
+| `mongo_writer.py` | Consommateur | Lit Kafka `stripe.payments.events` → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`) | [→](../producers/mongo_writer.py) |
 
 ### 3.3 — `flink/` — Job PyFlink de production
 
@@ -255,7 +255,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 | `features.py` | Module | Feature engineering partagée entraînement/inférence (même vecteur des deux côtés) | [→](../ml/features.py) |
 | `train_fraud_model.py` | Script | Entraîne XGBoost sur l'historique Postgres, trace le run dans MLflow, sauvegarde le `.pkl` | [→](../ml/train_fraud_model.py) |
 | `scoring.py` | Module | Charge le modèle (cache mémoire rechargé quand le `mtime` du `.pkl` change) et prédit — utilisé par `flink_like_job.py` | [→](../ml/scoring.py) |
-| `monitor.py` | Script | Boucle continue : drift Evidently + performance live + réentraînement auto | [→](../ml/monitor.py) |
+| `monitor.py` | Script | Boucle continue : dérive Evidently + performance live + réentraînement auto | [→](../ml/monitor.py) |
 | `Dockerfile` | Infra | Image du service `ml-monitor` | [→](../ml/Dockerfile) |
 | `models/` | Généré (gitignored) | `.pkl` + `.meta.json` produits par `make ml-train` | — |
 
@@ -269,7 +269,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
-| `app.py` | App web | Dashboard live, 2 onglets : Vue d'ensemble (KPIs, charts, alertes) + Performance ML (drift, recall, distribution par modèle) | [→](../dashboard/app.py) |
+| `app.py` | App web | Dashboard live, 2 onglets : Vue d'ensemble (KPIs, charts, alertes) + Performance ML (dérive, rappel, distribution par modèle) | [→](../dashboard/app.py) |
 | `Dockerfile` | Infra | Image Python 3.11-slim + Streamlit, containerise le dashboard (service `dashboard`, port 8501) | [→](../dashboard/Dockerfile) |
 
 ### 3.5 — `seed/` — Données initiales
@@ -319,7 +319,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
 | `test_e2e.py` | Test | 16 tests : PG, Redis, Mongo, pipeline E2E (nécessite la stack Docker vivante) | [→](../tests/test_e2e.py) |
-| `test_ml_model.py` | Test | Tests du module `ml/` : features, cycle train/save/load, fallback rule-based — **sans Docker** (données synthétiques) | [→](../tests/test_ml_model.py) |
+| `test_ml_model.py` | Test | Tests du module `ml/` : features, cycle train/save/load, repli rule-based — **sans Docker** (données synthétiques) | [→](../tests/test_ml_model.py) |
 
 ### 3.12 — `docs/` — Documentation
 
@@ -368,8 +368,8 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 2. Construit la config PG depuis `PG_HOST`/`PG_DB`/etc.
 3. Pour chaque tick (1 / `--rate` sec) :
    - Décide `is_fraud = random.random() < --fraud-ratio`.
-   - Si pas de burst en cours : pioche un merchant + (customer, pm) selon le segment (`new`/`inactive` pour fraude, `standard`/`premium` pour normal).
-   - 30% des fraudes déclenchent un **burst** de 12-20 txns rapides (card testing simulé).
+   - Si pas de rafale en cours : pioche un merchant + (customer, pm) selon le segment (`new`/`inactive` pour fraude, `standard`/`premium` pour normal).
+   - 30% des fraudes déclenchent un **rafale** de 12-20 txns rapides (card testing simulé).
    - Construit la transaction avec `build_transaction(is_fraud)` :
      - `is_fraud=True` → 70% gros montant (100-2000€), 30% petit (1-5€) pour card testing.
      - 50% des fraudes vont dans un pays à risque (`RU`/`NG`/`KP`/`IR`/`VE`).
@@ -381,7 +381,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 **Points d'attention** :
 - `metadata.is_fraud_pattern` = `True` est volontairement mis dans le JSONB → permet de mesurer
   la **rappel** du modèle (combien de fraudes réelles sont détectées).
-- Le burst crée de la vélocité côté Redis → c'est ce qui déclenche la règle R4.
+- Le rafale crée de la vélocité côté Redis → c'est ce qui déclenche la règle R4.
 
 ### 4.2 — [`flink_like_job.py`](../producers/flink_like_job.py) — Le scorer fraude
 
@@ -389,8 +389,8 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 `fraud_score` pour chaque transaction, et pousse le résultat dans 2 topics Kafka.
 
 **Logique** :
-1. Connexions : Redis (feature store) + Kafka Consumer + Kafka Producer + Postgres (write-back optionnel).
-2. Consumer Kafka : `group.id=flink-fraud-scorer`, `auto.offset.reset=earliest`, subscribe `stripe.public.transactions`.
+1. Connexions : Redis (feature store) + Kafka Consommateur + Kafka Producer + Postgres (write-back optionnel).
+2. Consommateur Kafka : `group.id=flink-fraud-scorer`, `auto.offset.reset=earliest`, subscribe `stripe.public.transactions`.
 3. Boucle `consumer.poll(1.0)` :
    - **Parse error** (JSON malformé, raw vide) → DLQ `stripe.etl.dead-letter` + continue.
    - **Scoring** via `score_transaction(txn, r)` :
@@ -407,7 +407,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 
 **Points d'attention** :
 - **Score min(round, 4, 1.0)** → cap à 1.0 max.
-- Le write-back PG peut faire boucler Debezium → OK, le consumer a `auto.offset.reset=earliest`
+- Le write-back PG peut faire boucler Debezium → OK, le consommateur a `auto.offset.reset=earliest`
   seulement au 1er démarrage, et on ne fait l'UPDATE que si `fraud_score IS NULL`.
 - Les `velocity_1h`/`velocity_24h` sont **écrites** avant d'être lues (sliding window).
 
@@ -416,7 +416,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 **Rôle** : Lit le topic `stripe.payments.events` et écrit dans MongoDB.
 
 **Logique** :
-1. Connexions : MongoDB + Kafka Consumer + Kafka Producer (DLQ).
+1. Connexions : MongoDB + Kafka Consommateur + Kafka Producer (DLQ).
 2. Subscribe `stripe.payments.events`, group `mongo-writer`.
 3. Pour chaque message :
    - **Parse JSON** (sinon DLQ).
@@ -555,7 +555,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
    - 2) Remonter depuis `__file__` (cherche dans chaque parent).
 2. Si trouvé :
    - Essaie `from dotenv import load_dotenv` (déjà installé).
-   - Fallback : parse manuel (gère quotes + commentaires).
+   - Repli : parse manuel (gère quotes + commentaires).
 
 **Pattern d'usage** (à mettre en haut de **chaque** script) :
 ```python
@@ -583,7 +583,7 @@ import _env  # noqa: F401
 5. Le tout tourne dans un `mlflow.start_run()` : params, métriques, et le modèle (`mlflow.xgboost.log_model(..., registered_model_name="fraud-detector")`) sont tracés ensemble
 6. Sauvegarde locale : `ml/models/fraud_xgboost-v1.pkl` + `.meta.json` (repris par `ml/scoring.py` côté inférence)
 
-**Dépendances** : Postgres (source), MLflow (tracking — fallback fichier local si `MLFLOW_TRACKING_URI` absent).
+**Dépendances** : Postgres (source), MLflow (suivi — repli fichier local si `MLFLOW_TRACKING_URI` absent).
 
 **Point d'attention** : `extract_current_window()`, dans ce même fichier, est réutilisée par `ml/monitor.py` — même requête, bornée sur une fenêtre récente au lieu de tout l'historique.
 
@@ -610,10 +610,10 @@ import _env  # noqa: F401
 1. Récupère la référence (`extract_training_data()` + le même split que l'entraînement) et la fenêtre courante (`extract_current_window()`)
 2. `compute_drift()` — Evidently `DataDriftPreset`, extrait `share_of_drifted_columns`
 3. `compute_live_performance()` — applique le modèle actuel aux données fraîches, calcule precision/recall/f1 contre la vérité terrain
-4. Si `drift_share > ML_DRIFT_THRESHOLD` OU `recall < ML_MIN_RECALL` : appelle `train_fraud_model.main()` directement (import Python, pas un sous-process) — protégé par un cooldown pour ne pas réentraîner à chaque cycle si le problème persiste
+4. Si `drift_share > ML_DRIFT_THRESHOLD` OU `recall < ML_MIN_RECALL` : appelle `train_fraud_model.main()` directement (import Python, pas un sous-process) — protégé par un délai de carence pour ne pas réentraîner à chaque cycle si le problème persiste
 5. Écrit un document dans `MongoDB.ml_monitoring` à chaque cycle — c'est la source de données de l'onglet "Performance ML" du dashboard
 
-**Dépendances** : Postgres (données), MongoDB (écriture du statut), MLflow (tracking des réentraînements déclenchés), `ml/train_fraud_model.py` (import direct).
+**Dépendances** : Postgres (données), MongoDB (écriture du statut), MLflow (suivi des réentraînements déclenchés), `ml/train_fraud_model.py` (import direct).
 
 ---
 
@@ -623,7 +623,7 @@ import _env  # noqa: F401
 
 | Type | Pattern | Exemple |
 |---|---|---|
-| Producer / consumer / job | `snake_case.py` | `transaction_producer.py` |
+| Producer / consommateur / job | `snake_case.py` | `transaction_producer.py` |
 | Script utilitaire | `snake_case.py` | `seed_data.py` |
 | Test | `test_*.py` | `test_e2e.py` |
 | Bash | `snake_case.sh` | `create_topics.sh` |
@@ -685,7 +685,7 @@ Tous les scripts utilisent des préfixes texte en majuscules entre crochets (pas
 - `[INFO]` information
 - `  → ` sous-étape (flèche conservée pour décrire un flux/une transition)
 - `  [DLQ]` message envoyé en DLQ
-- `  [BURST]` burst de fraude détecté
+- `  [BURST]` rafale de fraude détecté
 
 Format typique : `f"  [{count:6d} txns, {fraud:4d} fraud] rate={rate:.1f}/s"`
 

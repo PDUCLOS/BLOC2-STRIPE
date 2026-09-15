@@ -38,7 +38,7 @@ Le script `demo.sh` :
 - déploie le connecteur Debezium
 - insère le seed (200 merchants, 5000 customers)
 - lance le flink-like job (scoring fraude temps réel — règles par défaut, `SCORING_ENGINE=ml` après `make ml-train`)
-- lance le consumer Kafka→Mongo
+- lance le consommateur Kafka→Mongo
 - lance le dashboard Streamlit
 - lance le producer de transactions en continu
 
@@ -88,7 +88,7 @@ docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
 | Service | URL | Credentials |
 |---|---|---|
 | Streamlit Dashboard | http://localhost:8501 | admin / Bloc2-Demo-2026 (démo locale) |
-| MLflow (tracking + registre de modèles) | http://localhost:5001 | — |
+| MLflow (suivi + registre de modèles) | http://localhost:5001 | — |
 | Airflow (si `docker compose --profile airflow up -d`) | http://localhost:8090 | admin / voir `docker logs stripe-airflow` |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
 | Kafka brokers | `localhost:9092` (Docker) / `localhost:29092` (host) | — |

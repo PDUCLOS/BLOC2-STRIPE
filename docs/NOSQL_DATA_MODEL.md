@@ -129,7 +129,7 @@ jours) sont en place pour l'accueillir sans migration.
 Feature store offline pour l'entraînement ML — détaillé dans
 [`ML_INTEGRATION_STRATEGY.md`](ML_INTEGRATION_STRATEGY.md). Index unique
 sur `customer_id` : **une seule ligne par client**, à la différence des
-autres collections qui sont append-only — celle-ci est un **snapshot**
+autres collections qui sont append-only — celle-ci est un **instantané**
 mis à jour (upsert), pas un historique. Alimentée en continu par
 [`mongo_writer.py`](../producers/mongo_writer.py) (`update_one(...,
 upsert=True)` à chaque transaction scorée) — vérifié en conditions réelles
@@ -150,13 +150,13 @@ n'est pas prévisible à l'avance (texte libre, pièces jointes potentielles).
 
 | Collection | Index | Type | Justification |
 |---|---|---|---|
-| `transaction_logs` | `{ txn_id: 1 }` | Simple | Lookup direct par transaction (jointure applicative avec Postgres) |
+| `transaction_logs` | `{ txn_id: 1 }` | Simple | Recherche direct par transaction (jointure applicative avec Postgres) |
 | `transaction_logs` | `{ created_at: 1 }`, `expireAfterSeconds: 7776000` | **TTL** | Purge RGPD automatique à 90 jours — pas de job de suppression à maintenir |
 | `transaction_logs` | `{ event_type: 1, created_at: -1 }` | Composé | Filtrer par type d'événement puis trier par récence — pattern de requête du monitoring |
 | `user_interactions` | `{ customer_id: 1, timestamp: -1 }` | Composé | "Historique d'un client trié par récence" — requête d'investigation typique |
 | `user_interactions` | `{ timestamp: 1 }`, TTL 30j | TTL | Cycle de vie plus court que les transactions (données comportementales, moins critiques à conserver) |
-| `ml_features` | `{ customer_id: 1 }`, `unique: true` | Unique | Garantit un seul document par client (c'est un snapshot, pas un historique — cf. §2.5) |
-| `fraud_alerts` | `{ txn_id: 1 }` | Simple | Lookup direct |
+| `ml_features` | `{ customer_id: 1 }`, `unique: true` | Unique | Garantit un seul document par client (c'est un instantané, pas un historique — cf. §2.5) |
+| `fraud_alerts` | `{ txn_id: 1 }` | Simple | Recherche direct |
 | `fraud_alerts` | `{ customer_id: 1, created_at: -1 }` | Composé | "Alertes d'un client donné, récentes d'abord" |
 | `fraud_alerts` | `{ decision: 1, created_at: -1 }` | Composé | Filtrer par décision (`block`/`review`) — c'est la requête du dashboard `fraud_alerts_mongo()` |
 | `fraud_alerts` | `{ created_at: -1 }` | Simple | Tri chronologique seul, pour les vues qui ne filtrent pas par décision |

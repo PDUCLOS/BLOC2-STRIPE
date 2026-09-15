@@ -182,7 +182,7 @@ Sans Kafka, le système serait synchrone : à chaque INSERT Postgres, le scoring
 KRaft est le mode consensus natif de Kafka depuis 3.3, stabilisé en 3.6+. Il élimine la dépendance externe à Zookeeper, simplifie l'opération, et réduit la latence de quelques ms. C'est désormais le défaut recommandé par Confluent.
 
 **Choix d'implémentation :**
-- **12 partitions** sur `stripe.payments.events` : permet de paralléliser le scoring jusqu'à 12 consumers (scalabilité horizontale)
+- **12 partitions** sur `stripe.payments.events` : permet de paralléliser le scoring jusqu'à 12 consommateurs (scalabilité horizontale)
 - **Rétention 7-30 jours** selon le topic : assez pour rejouer un bug ou backfiller un dashboard
 - **Compression snappy** sur le producer : ~70% de gain sur des payloads JSON
 - **Dual listener** (`kafka:9092` interne + `localhost:29092` host) : pour que les scripts Python sur la machine et les conteneurs Docker accèdent au même broker avec la bonne résolution DNS
@@ -211,7 +211,7 @@ Coûteux en DB load, et il y a toujours un décalage entre le commit et la lectu
 3. Debezium sérialise chaque changement en JSON, et `produce` dans Kafka
 4. Le **slot de réplication** (`stripe_debezium_slot`) garantit que Debezium ne "saute" aucun changement, même s'il est déconnecté temporairement
 
-**Point critique rencontré en démo :** avec `snapshot.mode: initial` et des tables **vides** au moment du deploy, Debezium reste bloqué en mode "No previous offsets found" et ne stream jamais. Fix : `snapshot.mode: no_data` (démarre en streaming à partir du LSN courant, sans snapshot initial). Documenté pour ARM64 + Postgres 16.
+**Point critique rencontré en démo :** avec `snapshot.mode: initial` et des tables **vides** au moment du deploy, Debezium reste bloqué en mode "No previous offsets found" et ne stream jamais. Fix : `snapshot.mode: no_data` (démarre en streaming à partir du LSN courant, sans instantané initial). Documenté pour ARM64 + Postgres 16.
 
 **Transform `unwrap`** : Debezium encapsule chaque event dans une envelope `{"before": ..., "after": ...}`. Le transform `ExtractNewRecordState` extrait directement l'état final de la ligne, plus simple à consommer.
 
@@ -227,12 +227,12 @@ Pour détecter la fraude, on a besoin de features qui dépendent de **l'historiq
 
 Ces features ne sont pas dans la table `transactions` — elles sont **dérivées en temps réel** du flux d'événements. Redis est le bon outil : latence sub-ms, structures de données natives pour les fenêtres glissantes (sorted sets), et TTL automatique.
 
-**Pourquoi Flink (et pas un simple consumer Python) ?**
-Pour une démo locale, un consumer Python fait le job. Mais en prod avec 1000+ txns/s, Flink apporte :
-- **Exactly-once** : pas de double-scoring si le consumer crash
+**Pourquoi Flink (et pas un simple consommateur Python) ?**
+Pour une démo locale, un consommateur Python fait le job. Mais en prod avec 1000+ txns/s, Flink apporte :
+- **Exactly-once** : pas de double-scoring si le consommateur crash
 - **State management distribué** : si une fenêtre de velocity s'étend sur plusieurs partitions, Flink sait merger les états
 - **Checkpointing** : reprise après crash en < 1 minute
-- **Backpressure** : si Redis rame, Flink ralentit automatiquement le consumer Kafka
+- **Backpressure** : si Redis rame, Flink ralentit automatiquement le consommateur Kafka
 - **Watermarks** : gestion correcte des events en retard (event time vs processing time)
 
 **Architecture du job PyFlink :**
@@ -289,7 +289,7 @@ EXPIRE velocity:cust_id:1h  3700  (pour cleanup auto)
 ZCARD velocity:cust_id:1h  → donne le count dans la dernière heure
 ```
 
-**Point technique rencontré :** l'image Docker PyFlink custom sur Mac M-series (ARM64) est **impossible à builder** : cascade de bugs (numpy 1.21.4 imposé par setup.py, JDK headers manquants, `ClassCastException: [B` au runtime). **Fallback démo** : un job Python "Flink-like" (`producers/flink_like_job.py`) qui implémente exactement la même logique DataStream. Le code est documenté pour expliquer que c'est un fallback démo, pas une limitation de l'archi. En prod, on déploie un vrai job PyFlink via Flink standalone ou KDA.
+**Point technique rencontré :** l'image Docker PyFlink custom sur Mac M-series (ARM64) est **impossible à builder** : cascade de bugs (numpy 1.21.4 imposé par setup.py, JDK headers manquants, `ClassCastException: [B` au runtime). **Repli démo** : un job Python "Flink-like" (`producers/flink_like_job.py`) qui implémente exactement la même logique DataStream. Le code est documenté pour expliquer que c'est un repli démo, pas une limitation de l'archi. En prod, on déploie un vrai job PyFlink via Flink standalone ou KDA.
 
 ---
 
@@ -307,7 +307,7 @@ Trois raisons :
 |---|---|---|---|
 | `transaction_logs` | Log append-only de chaque event (scoring, alert) | 90 jours (RGPD) | `txn_id`, `event_type + created_at` |
 | `user_interactions` | Clics, échecs d'auth, sessions | 30 jours (RGPD) | `customer_id + timestamp` |
-| `ml_features` | Snapshot consolidé des features (pour entraînement batch) | infini | `customer_id` (unique) |
+| `ml_features` | Instantané consolidé des features (pour entraînement batch) | infini | `customer_id` (unique) |
 | `customer_feedback` | Disputes, contestations, notes | infini | `customer_id`, `merchant_id` |
 | `fraud_alerts` | Alertes émises par Flink | infini | `txn_id`, `decision + created_at` |
 
@@ -324,12 +324,12 @@ Pour une démo, Streamlit est imbattable : Python pur, auto-refresh, `st.metric(
 
 **Accès protégé par login** (hash SHA-256 du mot de passe dans `.env`, anti-bruteforce) — connexion de démo sur http://localhost:8501 : **`admin` / `Bloc2-Demo-2026`** — puis **2 onglets** (`dashboard/app.py`) :
 
-| Onglet | Données (fonction → source) | Use case |
+| Onglet | Données (fonction → source) | Cas d'usage |
 |---|---|---|
 | **Vue d'ensemble** | `kpis_from_pg()`, `txn_over_time()`, `fraud_by_country()`, `top_merchants()`, `recent_suspicious()` → PostgreSQL (rôle `analytics_reader`) ; `fraud_alerts_mongo()` → MongoDB `fraud_alerts` ; `redis_stats()` → Redis | Vue executive + travail du risk analyst |
 | **Performance ML** | `ml_monitoring_latest()` / `ml_monitoring_history()` → MongoDB `ml_monitoring` ; `fraud_score_by_model_version()` → PostgreSQL | Dérive, précision/rappel servis, comparaison `rule-based-v1` vs `xgboost-v1` |
 
-**Auto-refresh modéré** (5s) : on évite de marteler la DB tout en gardant l'illusion du temps réel. Sur l'Overview, on pourrait utiliser `st.fragment` pour ne refetcher que les KPIs sans rerender toute la page.
+**Auto-refresh modéré** (5s) : on évite de marteler la DB tout en gardant l'illusion du temps réel. Sur la vue d'ensemble, on pourrait utiliser `st.fragment` pour ne refetcher que les KPIs sans rerender toute la page.
 
 ---
 
@@ -378,16 +378,16 @@ fact_transactions ──────── dim_merchants
 
 **Le problème que ça résout :** un modèle entraîné une fois et jamais revisité se dégrade avec le temps (les patterns de fraude évoluent, la distribution du trafic change). Il faut (1) savoir comparer les versions successives du modèle, et (2) détecter automatiquement quand le modèle en production décroche, plutôt que de s'en apercevoir a posteriori sur un incident.
 
-**MLflow — tracking + registre de modèles :**
+**MLflow — suivi + registre de modèles :**
 - `ml/train_fraud_model.py` ouvre un run MLflow à chaque entraînement (manuel `make ml-train`, ou automatique via ml-monitor) : hyperparamètres, métriques (precision/recall/f1/ROC AUC), et le modèle sérialisé sont tous tracés ensemble
-- Chaque run **enregistre une nouvelle version** du modèle `fraud-detector` dans le Model Registry — contrairement au fichier `.pkl` local (qui écrase la version précédente), l'historique complet reste consultable dans l'UI (`http://localhost:5001`)
+- Chaque run **enregistre une nouvelle version** du modèle `fraud-detector` dans le Registre de modèles — contrairement au fichier `.pkl` local (qui écrase la version précédente), l'historique complet reste consultable dans l'UI (`http://localhost:5001`)
 - Backend SQLite + artefacts servis via l'API HTTP du serveur (`--serve-artifacts`) : un client MLflow (host macOS ou conteneur) n'a jamais besoin d'accéder directement au système de fichiers du conteneur `mlflow`, tout passe par HTTP
 
-**Evidently — détection de drift, dans `ml/monitor.py` (service `ml-monitor`) :**
+**Evidently — détection de dérive, dans `ml/monitor.py` (service `ml-monitor`) :**
 - Boucle continue (toutes les `ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) : compare les features de la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes de transactions) à celles utilisées à l'entraînement (`DataDriftPreset`, `share_of_drifted_columns`)
-- Calcule en parallèle le recall du modèle actuel sur les données fraîches (vérité terrain = `is_fraud_pattern` du générateur) — un modèle peut ne montrer aucun drift de features et quand même décrocher en performance (concept drift), d'où les deux signaux, pas un seul
-- Si `drift_share > ML_DRIFT_THRESHOLD` (0.3 par défaut) OU `recall < ML_MIN_RECALL` (0.7 par défaut) : déclenche automatiquement `ml/train_fraud_model.py` — un cooldown (3× l'intervalle) évite de relancer un entraînement à chaque cycle tant que le problème persiste
-- Chaque cycle écrit un document dans `MongoDB.ml_monitoring` (statut, drift, performance, décision de réentraînement) — c'est ce que lit l'onglet "Performance ML" du dashboard
+- Calcule en parallèle le rappel du modèle actuel sur les données fraîches (vérité terrain = `is_fraud_pattern` du générateur) — un modèle peut ne montrer aucun dérive de features et quand même décrocher en performance (dérive de concept), d'où les deux signaux, pas un seul
+- Si `drift_share > ML_DRIFT_THRESHOLD` (0.3 par défaut) OU `recall < ML_MIN_RECALL` (0.7 par défaut) : déclenche automatiquement `ml/train_fraud_model.py` — un délai de carence (3× l'intervalle) évite de relancer un entraînement à chaque cycle tant que le problème persiste
+- Chaque cycle écrit un document dans `MongoDB.ml_monitoring` (statut, dérive, performance, décision de réentraînement) — c'est ce que lit l'onglet "Performance ML" du dashboard
 
 **Rechargement à chaud :** `ml/scoring.py::load_model()` revérifie le `mtime` du `.pkl` et recharge le modèle s'il a été réécrit : un réentraînement déclenché par `ml-monitor` est pris en compte par le scorer déjà lancé, sans redémarrage. Le coût est un `stat()` du fichier par appel, négligeable devant l'inférence.
 
@@ -421,7 +421,7 @@ L'image `postgres:16-alpine` n'a pas le binaire `locale` compilé. `pg_import_sy
 
 ### 4.4 Debezium `snapshot.mode: no_data` (pas `initial`)
 
-Sur des tables vides au moment du deploy + Postgres 16, `snapshot.mode: initial` fait que Debezium reste bloqué en loop "No previous offsets found" et ne stream jamais. Avec `no_data`, on démarre direct en streaming à partir du LSN courant. Le snapshot initial est utile seulement pour backfiller un data lake à partir de l'existant.
+Sur des tables vides au moment du deploy + Postgres 16, `snapshot.mode: initial` fait que Debezium reste bloqué en loop "No previous offsets found" et ne stream jamais. Avec `no_data`, on démarre direct en streaming à partir du LSN courant. Le instantané initial est utile seulement pour backfiller un data lake à partir de l'existant.
 
 ### 4.5 Write-back du `fraud_score` dans Postgres
 
@@ -591,11 +591,11 @@ conditions réelles (stack Docker complète) :
 
 - ~~Modèle de scoring simple (5 règles statiques)~~ → **Modèle XGBoost réel**,
   entraîné sur la vérité terrain du générateur, activable via `SCORING_ENGINE=ml`
-  avec fallback automatique sur les règles (§3.4, §3.8)
+  avec repli automatique sur les règles (§3.4, §3.8)
 - ~~Pas d'Airflow~~ → **DAG Airflow réel** (`dags/stripe_daily_etl.py`,
   profil optionnel `airflow`), testé de bout en bout (§3.8, §4.12)
-- ~~Pas de tracking/monitoring du modèle~~ → **MLflow** (tracking + registre
-  de modèles) + **Evidently** (drift + performance live, réentraînement
+- ~~Pas de tracking/monitoring du modèle~~ → **MLflow** (suivi + registre
+  de modèles) + **Evidently** (dérive + performance live, réentraînement
   automatique) — service `ml-monitor` (§3.8)
 - ~~`ml_features` (collection Mongo) documentée mais jamais écrite~~ →
   alimentée en continu par `mongo_writer.py`, feature store offline réel
@@ -739,7 +739,7 @@ conditions réelles (stack Docker complète) :
 | Détection d'une fraude évidente | Le test E2E insère une transaction à 1 500 € depuis un pays à risque : score ≥ 0,85, `block` et ligne `fraud_indicators` vérifiés | `make test` |
 | Performance **servie** du modèle (live) | Précision 0,93 · rappel 0,96 sur 13 minutes de trafic en régime établi (1 225 VP, 92 FP, 45 FN — 15/09/2026, 17:00-17:12 UTC, première minute après redémarrage exclue : 0,82). La requête `queries/postgres_oltp.sql` §3 mesure sur 24 h glissantes et donne donc un chiffre différent selon l'historique | Même logique que §3 avec un filtre par minute, onglet "Performance ML" |
 | Performance **offline** du dernier entraînement | Varie à chaque réentraînement automatique : lire `ml/models/fraud_xgboost-v1.meta.json` (au 15/09 17:10 : précision 0,77, rappel 0,97, AUC 0,99 sur 21 744 transactions de test) | `make ml-train`, MLflow http://localhost:5001 |
-| Drift détecté | 0% (stack fraîchement seedée) | Onglet "Performance ML" → carte "Drift (part colonnes)" |
+| Dérive détecté | 0% (stack fraîchement seedée) | Onglet "Performance ML" → carte "Dérive (part colonnes)" |
 | Disponibilité | 5/5 services core healthy (+ MLflow, ml-monitor) | `make status` |
 | Conformité RGPD | TTL 90j automatique | `db.transaction_logs.getIndexes()` → voir le `expireAfterSeconds: 7776000` |
 

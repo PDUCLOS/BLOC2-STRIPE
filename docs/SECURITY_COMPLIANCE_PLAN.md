@@ -71,7 +71,7 @@ GRANT SELECT (pm_id, customer_id, type, brand, last4, is_default, expires_at, cr
 Le mot de passe est posé séparément par `postgres_init_roles.sh` (même
 raison que pour `replication_user` : ne pas hardcoder de secret dans le SQL
 d'init). Le dashboard lit `PG_ANALYTICS_USER`/`PG_ANALYTICS_PASSWORD` en
-priorité, avec fallback sur `PG_USER`/`PG_PASSWORD` pour ne pas casser une
+priorité, avec repli sur `PG_USER`/`PG_PASSWORD` pour ne pas casser une
 installation où ce rôle n'a pas encore été créé.
 
 ### 3.3 — MongoDB / Redis
@@ -160,7 +160,7 @@ manuels documentés en `PRESENTATION.md §7.2`).
 
 | Outil | Usage |
 |---|---|
-| `docker-compose` healthchecks | Postgres, MongoDB, Kafka, Redis, Debezium — `make up` attend l'état `healthy` avant de poursuivre l'init (`demo.sh`) |
+| `docker-compose` sondes de santé | Postgres, MongoDB, Kafka, Redis, Debezium — `make up` attend l'état `healthy` avant de poursuivre l'init (`demo.sh`) |
 | `make smoke` | Smoke tests manuels post-déploiement (`PRESENTATION.md §7.2`) |
 | `tests/test_e2e.py` | Suite de tests automatisés couvrant connectivité, schéma, CDC, TTL RGPD, pipeline de scoring |
 | Dashboard Streamlit | Statut live des 3 datastores (`OK`/`DOWN`) visible en sidebar (`dashboard/app.py`) |

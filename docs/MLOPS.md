@@ -60,7 +60,7 @@ vrai plutôt que resimuler) :
 
 1. `make init-env` + `make install` (`.venv`)
 2. `make up` (Postgres, MongoDB, Redis, Kafka, Debezium, MLflow, ml-monitor)
-3. Attente explicite des healthchecks Docker (pas un `sleep` à l'aveugle)
+3. Attente explicite des sondes de santé Docker (pas un `sleep` à l'aveugle)
 4. `scripts/create_topics.sh`, `postgres_init_roles.sh`, `deploy_debezium.sh`
 5. `make seed`
 6. Producer + scorer (`flink_like_job.py`, moteur à **règles** — pas besoin
@@ -108,15 +108,15 @@ Détail complet : [ML_INTEGRATION_STRATEGY.md](ML_INTEGRATION_STRATEGY.md).
 - **Deux moteurs de scoring** derrière un seul point d'entrée
   (`score_transaction()`), sélectionnés par `SCORING_ENGINE` : `rules`
   (défaut, déterministe, pas de dépendance modèle) ou `ml` (XGBoost, avec
-  fallback automatique sur `rules` si le modèle n'existe pas encore).
+  repli automatique sur `rules` si le modèle n'existe pas encore).
 - **Label** = vérité terrain du générateur (`is_fraud_pattern`), jamais la
   décision du moteur à règles — évite un entraînement circulaire.
 - **Split temporel** (pas aléatoire) pour éviter la fuite de données via les
   features de vélocité (fenêtre glissante par client).
-- **Tracking** : chaque run est loggé dans MLflow (params, métriques,
-  artefact), versionné dans le Model Registry (`fraud-detector`).
+- **Suivi** : chaque run est loggé dans MLflow (params, métriques,
+  artefact), versionné dans le Registre de modèles (`fraud-detector`).
 - **Chargement** : `ml/scoring.py::load_model()` — cache mémoire **avec
-  hot-reload** basé sur le `mtime` du `.pkl` (cf. §6 pour l'incident qui a
+  rechargement à chaud** basé sur le `mtime` du `.pkl` (cf. §6 pour l'incident qui a
   motivé ce choix).
 
 ---
@@ -134,7 +134,7 @@ terminée par des `assert` :
 4. Performance réelle **servie** (pas resimulée) — matrice de confusion,
    ROC/PR, seuils alignés sur `ml/monitor.py`
 5. Audit de l'artefact modèle (features alignées, écart offline/online)
-6. Détection de drift (Evidently)
+6. Détection de dérive (Evidently)
 7. Historique `ml_monitoring` (précision/rappel/drift dans le temps, avec
    marqueurs de réentraînement)
 8. Synthèse — à relancer seule avant une démo/soutenance
@@ -160,11 +160,11 @@ pour la soutenance plutôt que des scénarios théoriques.
 
 ### 5.1 — Double-scoring via écho CDC (2026-09-15)
 
-**Symptôme** : précision servie mesurée à **29%** (recall stable ~96%).
+**Symptôme** : précision servie mesurée à **29%** (rappel stable ~96%).
 
 **Root cause** : `producers/flink_like_job.py` écrit `fraud_score` dans
 Postgres après scoring (write-back). Debezium capte cet `UPDATE` et le
-republie sur le **même topic** que le consumer écoute → chaque transaction
+republie sur le **même topic** que le consommateur écoute → chaque transaction
 produisait 2 événements CDC, tous les deux scorés : vélocité Redis
 incrémentée 2x, transaction rescorée et ré-émise vers Mongo 2x. Le modèle
 lui-même (entraîné en SQL pur sur Postgres, jamais exposé à Redis) n'était
@@ -178,7 +178,7 @@ Précision servie après correctif : **97%** (1858 transactions).
 **Bug connexe découvert dans la foulée** : `ml/scoring.py::load_model()`
 ne rechargeait le `.pkl` qu'une fois par process. `ml-monitor` avait
 déclenché 2 réentraînements automatiques sans que le scorer déjà lancé ne
-les charge jamais — l'auto-retrain tournait dans le vide. Corrigé par un
+les charge jamais — le réentraînement automatique tournait dans le vide. Corrigé par un
 check de `mtime` à chaque appel de `load_model()`.
 
 Détails complets, chiffres minute par minute :
@@ -229,7 +229,7 @@ vélocité Redis se reconstitue naturellement — le moteur à règles n'a pas
 cette corrélation apprise (sa règle `velocity_1h > 10` ne réagit qu'à une
 vélocité **haute**, jamais basse) et n'est donc pas affecté par ce mode de
 défaillance. C'est aussi pourquoi la CI (§2) utilise `rules` et non `ml` :
-un burst de trafic court en CI ressemble structurellement à un post-flush
+un rafale de trafic court en CI ressemble structurellement à un post-flush
 (beaucoup de `velocity_1h=1` par manque de temps pour accumuler de
 l'historique) — tester `ml` en CI heurterait le même piège à chaque run.
 

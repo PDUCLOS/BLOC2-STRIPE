@@ -56,7 +56,7 @@ En pratique, le connecteur fait donc 3 choses : il lit PostgreSQL, il transforme
 - Ce fichier démarre un CDC PostgreSQL vers Kafka.
 - Il cible uniquement les tables métier utiles au projet.
 - Il aplatit les événements Debezium pour les rendre plus simples à consommer.
-- Il démarre par un snapshot initial puis suit les changements en continu.
+- Il démarre par un instantané initial puis suit les changements en continu.
 
 ## Comment le lire rapidement
 
@@ -65,6 +65,6 @@ Si tu veux aller à l'essentiel, retiens ce chemin de lecture :
 1. Les lignes 4 à 13 définissent la source PostgreSQL.
 2. Les lignes 14 à 18 définissent ce qu'on capture et comment on réécrit les événements.
 3. Les lignes 19 à 26 définissent le format des messages envoyés à Kafka.
-4. Les lignes 24 à 26 disent si on prend un snapshot de départ et comment on encode les types.
+4. Les lignes 24 à 26 disent si on prend un instantané de départ et comment on encode les types.
 
 Si tu veux, je peux aussi te faire une version directement intégrée dans un fichier `.jsonc` commenté, ou t'expliquer chaque option en mode très simple.

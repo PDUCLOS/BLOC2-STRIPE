@@ -17,7 +17,7 @@ Chargeur `.env` universel, importé en tête de **tous** les scripts Python du r
 | Fonction | Rôle |
 |---|---|
 | `_find_env_file()` | Cherche `.env` : d'abord `cwd`, puis en remontant les parents de `__file__` |
-| *(import seul)* | Charge le `.env` trouvé dans `os.environ` via `python-dotenv`, ou parsing manuel en fallback |
+| *(import seul)* | Charge le `.env` trouvé dans `os.environ` via `python-dotenv`, ou parsing manuel en repli |
 
 ---
 
@@ -46,7 +46,7 @@ Génère un flux continu de transactions (95% légitimes / 5% fraude).
 | `pick_customer_pm(cur, is_fraud)` | Cible les segments `new`/`inactive` si fraude (profil type) |
 | `build_transaction(is_fraud)` | Construit le payload — pose `metadata.is_fraud_pattern`, la **vérité terrain** utilisée par `ml/train_fraud_model.py` |
 | `insert_transaction(cur, txn)` | `INSERT` paramétré dans `transactions` |
-| `main()` | Boucle continue, gère les rafales ("bursts") simulant du card testing |
+| `main()` | Boucle continue, gère les rafales ("rafales") simulant du card testing |
 
 ### [`flink_like_job.py`](../producers/flink_like_job.py)
 Scorer fraude temps réel — lit `stripe.public.transactions`, écrit `fraud_score`.
@@ -54,11 +54,11 @@ Scorer fraude temps réel — lit `stripe.public.transactions`, écrit `fraud_sc
 | Fonction | Rôle |
 |---|---|
 | `signal_handler(sig, frame)` | Arrêt propre sur Ctrl+C/SIGTERM |
-| `score_transaction(txn, r)` | Cœur du scoring — vélocité Redis, puis règles OU `ml.scoring.score()` selon `SCORING_ENGINE` (fallback auto sur règles si modèle absent) |
-| `main()` | `connect_pg()` interne (reconnexion throttlée), boucle consumer Kafka, write-back Postgres |
+| `score_transaction(txn, r)` | Cœur du scoring — vélocité Redis, puis règles OU `ml.scoring.score()` selon `SCORING_ENGINE` (repli automatique sur règles si modèle absent) |
+| `main()` | `connect_pg()` interne (reconnexion limitée), boucle consommateur Kafka, write-back Postgres |
 
 ### [`mongo_writer.py`](../producers/mongo_writer.py)
-Consumer Kafka → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`).
+Consommateur Kafka → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`).
 
 | Fonction | Rôle |
 |---|---|
@@ -96,18 +96,18 @@ Inférence — appelée par `producers/flink_like_job.py` quand `SCORING_ENGINE=
 | Fonction | Rôle |
 |---|---|
 | `load_model()` | Chargement paresseux, mis en cache en mémoire (pas de rechargement tant que le process tourne) |
-| `score(amount, created_at, ip_country, device_type, velocity_1h, velocity_24h)` | Renvoie une probabilité, ou `None` si le modèle n'existe pas encore (signal de fallback) |
+| `score(amount, created_at, ip_country, device_type, velocity_1h, velocity_24h)` | Renvoie une probabilité, ou `None` si le modèle n'existe pas encore (signal de repli) |
 
 ### [`monitor.py`](../ml/monitor.py)
-Boucle continue (service Docker `ml-monitor`) : drift + performance **réellement servie** + réentraînement auto.
+Boucle continue (service Docker `ml-monitor`) : dérive + performance **réellement servie** + réentraînement auto.
 
 | Fonction | Rôle |
 |---|---|
 | `get_mongo_db()` | Connexion Mongo |
 | `compute_drift(X_reference, X_current)` | Evidently `DataDriftPreset`, renvoie `drift_share` |
 | `_parse_is_fraud(payload)` | Extrait `metadata.is_fraud_pattern` (gère les deux formats vus en pratique : dict natif ou string JSON) |
-| `compute_served_performance(db, window_minutes)` | **Relit ce qui a été RÉELLEMENT décidé** en production (MongoDB `transaction_logs`) — pas une resimulation SQL. Corrige un angle mort découvert en conditions réelles (precision tombée à 0.29 sans que l'ancien check, basé sur SQL, ne le détecte) |
-| `check_once(db, last_retrain_at)` | Un cycle complet : drift + perf servie, déclenche `train_fraud_model.main()` si seuils franchis (cooldown anti-boucle) |
+| `compute_served_performance(db, window_minutes)` | **Relit ce qui a été RÉELLEMENT décidé** en production (MongoDB `transaction_logs`) — pas une resimulation SQL. Corrige un angle mort découvert en conditions réelles (précision tombée à 0.29 sans que l'ancien check, basé sur SQL, ne le détecte) |
+| `check_once(db, last_retrain_at)` | Un cycle complet : dérive + perf servie, déclenche `train_fraud_model.main()` si seuils franchis (délai de carence anti-boucle) |
 | `main()` | Boucle infinie, `ML_MONITOR_INTERVAL_SECONDS` entre chaque cycle |
 
 ---
@@ -137,7 +137,7 @@ Rafraîchit `mv_daily_revenue`/`mv_merchant_stats` (Postgres, créées `WITH NO 
 
 | Fonction | Rôle |
 |---|---|
-| `main()` | `REFRESH MATERIALIZED VIEW CONCURRENTLY`, fallback sans `CONCURRENTLY` au tout premier refresh |
+| `main()` | `REFRESH MATERIALIZED VIEW CONCURRENTLY`, repli sans `CONCURRENTLY` au tout premier refresh |
 
 ---
 

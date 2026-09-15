@@ -26,7 +26,7 @@ variable d'environnement `SCORING_ENGINE` :
 | Règles statiques | `rules` (défaut) | 5 règles additives à poids fixes | `rule-based-v1` |
 | Modèle entraîné | `ml` | XGBoost, chargé depuis `ml/models/fraud_xgboost-v1.pkl` | `xgboost-v1` |
 
-**Fallback automatique** : si `SCORING_ENGINE=ml` mais qu'aucun modèle n'a
+**Repli automatique** : si `SCORING_ENGINE=ml` mais qu'aucun modèle n'a
 encore été entraîné (`ml/scoring.py` renvoie `None`), le scorer retombe sur
 les règles sans planter — jamais de transaction non scorée par manque de
 modèle. Chaque transaction porte son `model_version`, donc les deux moteurs
@@ -41,7 +41,7 @@ peuvent cohabiter dans l'historique sans ambiguïté sur qui a scoré quoi.
 | **Redis** (sorted sets `v1h_<id>`/`v24h_<id>`, hash `feat_<id>`) | Feature store **online**, alimenté en temps réel par le scorer, quel que soit le moteur actif | ✅ Implémenté (préexistant) |
 | **MongoDB `transaction_logs`** | Historique complet des transactions scorées (payload JSON complet) | ✅ Implémenté (préexistant) |
 | **MongoDB `ml_features`** | Feature store **offline** consolidé — un document par client, mis à jour à chaque transaction scorée (`last_amount`, `last_country`, `velocity_1h/24h`, `last_fraud_score`, `last_model_version`, `last_updated`) | ✅ Implémenté — alimenté par [`mongo_writer.py`](../producers/mongo_writer.py) via `update_one(..., upsert=True)` sur `customer_id` |
-| **MongoDB `ml_monitoring`** | Historique des cycles de monitoring (drift, performance, décisions de réentraînement) | ✅ Implémenté — alimenté par [`ml/monitor.py`](../ml/monitor.py) |
+| **MongoDB `ml_monitoring`** | Historique des cycles de monitoring (dérive, performance, décisions de réentraînement) | ✅ Implémenté — alimenté par [`ml/monitor.py`](../ml/monitor.py) |
 
 `ml_features` n'était, à l'origine, qu'un schéma anticipé (index créé, jamais
 écrit). C'est maintenant un vrai feature store offline tenu à jour en
@@ -94,7 +94,7 @@ WHERE t.customer_id IS NOT NULL AND t.metadata ? 'is_fraud_pattern'
 
 `extract_training_data()` (tout l'historique, pour l'entraînement) et
 `extract_current_window(minutes)` (fenêtre récente, pour le monitoring)
-partagent cette même requête — condition pour que la comparaison drift ait
+partagent cette même requête — condition pour que la comparaison dérive ait
 un sens (comparer des choses calculées de la même façon).
 
 ---
@@ -107,7 +107,7 @@ un sens (comparer des choses calculées de la même façon).
 | Déséquilibre de classes | `scale_pos_weight = n_neg / n_pos`, calculé dynamiquement sur chaque run (≈16-17% de fraude sur les runs de test réels, cohérent avec `FRAUD_RATIO` du générateur) |
 | Validation | Split **temporel** 80/20 (`temporal_train_test_split()`) — pas aléatoire, pour éviter une fuite d'information via la corrélation temporelle des vélocités |
 | Fréquence de réentraînement | Manuelle (`make ml-train`) ou automatique (service `ml-monitor`, cf. §6) |
-| Tracking | Chaque run est tracé dans **MLflow** : hyperparamètres, métriques, modèle versionné dans le Model Registry (`fraud-detector`) |
+| Suivi | Chaque run est tracé dans **MLflow** : hyperparamètres, métriques, modèle versionné dans le Registre de modèles (`fraud-detector`) |
 
 **Résultats mesurés** — la source de vérité est toujours
 `ml/models/fraud_xgboost-v1.meta.json`, réécrit à chaque entraînement
@@ -160,14 +160,14 @@ if SCORING_ENGINE == "ml":
 garde en cache mémoire (comme la connexion Redis existante), mais **revérifie
 le `mtime` du fichier à chaque appel** et recharge si un réentraînement l'a
 réécrit depuis — sans ce check, un scorer longue durée ne voit jamais les
-retrains automatiques de `ml/monitor.py` (cf. §6, incident du 2026-09-15).
+réentraînements automatiques de `ml/monitor.py` (cf. §6, incident du 2026-09-15).
 Le coût d'un `stat()` par transaction est négligeable face au débit de démo
 (quelques txn/s). Renvoie `None` sans exception si le fichier n'existe pas
 encore — c'est ce `None` que le scorer interprète comme "utilise les règles".
 
 ### 5.3 — Rollout : ce qui est fait, ce qui reste
 
-- ✅ **Fallback automatique** vers les règles si le modèle est absent
+- ✅ **Repli automatique** vers les règles si le modèle est absent
 - ✅ **Traçabilité** via `model_version` sur chaque transaction — comparable dans le dashboard (onglet "Performance ML", histogramme par version)
 - ⏳ **A/B test par pourcentage de trafic** : le mécanisme de traçage existe, le routing différencié (servir aléatoirement rules/ml à X% du trafic) n'est pas implémenté — actuellement c'est un choix binaire par variable d'environnement, pas un split de trafic
 - ⏳ **Shadow mode** (calculer les deux scores sans agir sur le second) : non implémenté, mais le `model_version` déjà en place permettrait de l'ajouter sans changement de schéma
@@ -181,16 +181,16 @@ boucle continue (`ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) :
 
 | Métrique | Outil | Calcul |
 |---|---|---|
-| Data drift | **Evidently** (`DataDriftPreset`) | `share_of_drifted_columns` entre la fenêtre de référence (split d'entraînement) et la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes) |
+| Dérive des données | **Evidently** (`DataDriftPreset`) | `share_of_drifted_columns` entre la fenêtre de référence (split d'entraînement) et la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes) |
 | Performance live | scikit-learn | precision/recall/f1 du modèle actuel appliqué aux données fraîches, contre la vérité terrain (`is_fraud_pattern`) |
 | Historique | MongoDB `ml_monitoring` | Un document par cycle — lu par le dashboard |
 
 **Déclenchement automatique du réentraînement** : si `drift_share >
 ML_DRIFT_THRESHOLD` (0.3) OU `recall < ML_MIN_RECALL` (0.7), `ml/monitor.py`
 appelle directement `train_fraud_model.main()` (import Python, pas un
-sous-process) — protégé par un cooldown (3× l'intervalle) pour ne pas
+sous-process) — protégé par un délai de carence (3× l'intervalle) pour ne pas
 réentraîner en boucle tant que le problème persiste. Testé en conditions
-réelles : forcer un seuil de recall impossible à tenir déclenche bien un
+réelles : forcer un seuil de rappel impossible à tenir déclenche bien un
 réentraînement, enregistre une nouvelle version dans MLflow (`fraud-detector`
 v2), et le nouveau cycle de monitoring reflète le modèle mis à jour.
 
@@ -199,7 +199,7 @@ statut du dernier cycle, l'évolution drift/recall dans le temps (avec
 marqueurs sur les réentraînements déclenchés), la distribution des scores
 par `model_version`, et un lien direct vers l'UI MLflow.
 
-**Hot-reload** : `ml/scoring.py::load_model()` revérifie le `mtime` du `.pkl`
+**Rechargement à chaud** : `ml/scoring.py::load_model()` revérifie le `mtime` du `.pkl`
 à chaque scoring (cf. §5.2) — un réentraînement automatique prend donc effet
 sur le scorer déjà lancé, sans redémarrage manuel.
 
@@ -211,13 +211,13 @@ a détecté une alerte de précision et déclenché **deux réentraînements
 automatiques** consécutifs (13:56 UTC, 14:02 UTC) — chacun a bien produit un
 nouveau `.pkl` et une nouvelle version MLflow, mais le scorer déjà lancé
 (actif depuis 11:24 UTC) ne les a jamais chargés. La précision servie est
-restée bloquée à ~25% malgré les retrains, jusqu'au fix du hot-reload.
+restée bloquée à ~25% malgré les réentraînements, jusqu'au fix du rechargement à chaud.
 
 Root cause distincte, découverte dans la foulée : la précision catastrophique
-elle-même (jusqu'à 29% avant tout retrain) venait d'un bug de double-scoring
+elle-même (jusqu'à 29% avant tout réentraînement) venait d'un bug de double-scoring
 dans `producers/flink_like_job.py`, documenté en §7.1. Les deux bugs se
 superposaient : la chaîne de service dégradait la précision réelle, et
-l'absence de hot-reload empêchait le monitoring de corriger la situation
+l'absence de rechargement à chaud empêchait le monitoring de corriger la situation
 même en réentraînant. Le notebook [`notebooks/audit_data_ml.ipynb`](../notebooks/audit_data_ml.ipynb)
 (§4.3 et §7) documente l'investigation complète avec les chiffres avant/après.
 
@@ -230,7 +230,7 @@ même en réentraînant. Le notebook [`notebooks/audit_data_ml.ipynb`](../notebo
 `producers/flink_like_job.py` fait un write-back du `fraud_score` dans
 `transactions` après scoring pour que le dashboard SQL soit à jour sans
 JOIN Kafka. Or Debezium capte cet `UPDATE` et le republie sur le **même
-topic** `stripe.public.transactions` que le consumer écoute — chaque
+topic** `stripe.public.transactions` que le consommateur écoute — chaque
 transaction produisait donc deux événements CDC (l'`INSERT` original, puis
 l'écho de son propre `UPDATE`), et le scorer les traitait **tous les
 deux** : vélocité Redis incrémentée deux fois, transaction rescorée et
@@ -238,7 +238,7 @@ ré-émise vers Mongo deux fois. La vélocité systématiquement ~2x sa valeur
 réelle a désynchronisé les features servies de la distribution vue à
 l'entraînement (le modèle entraîné sur `transactions` en SQL pur n'a
 jamais été affecté, seule la chaîne de service l'était) — précision servie
-mesurée à **29%** avant correctif (recall resté à 96%, cohérent avec un
+mesurée à **29%** avant correctif (rappel resté à 96%, cohérent avec un
 biais qui pousse le score vers le haut sans dégrader la détection des
 vrais positifs).
 

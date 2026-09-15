@@ -133,7 +133,7 @@ choix délibéré pour garder le MVP simple : le schéma est prêt pour cette
 | `AUTO_RESUME=TRUE` | idem | Le warehouse redémarre automatiquement à la prochaine requête, sans intervention manuelle |
 | Prédicat de date sur `dim_date.date_key` (`NUMBER`) plutôt que `TIMESTAMP` | Jointure fact↔dim_date | Comparaison d'entiers, moins coûteuse qu'une comparaison de timestamps avec fuseau horaire |
 | Dénormalisation du type/marque de paiement à l'extraction (`pm.type AS pm_type`) | `load_snowflake.py` | Évite une jointure supplémentaire au moment du reporting — le prix est payé une fois à l'ETL plutôt qu'à chaque requête BI |
-| `MERGE` avec sous-requête scalaire pour résoudre les surrogate keys | `load_snowflake.py` | Résout `merchant_key`/`customer_key`/`pm_key`/`geo_key` au chargement, pas à la lecture — les requêtes BI n'ont pas à faire ce lookup |
+| `MERGE` avec sous-requête scalaire pour résoudre les surrogate keys | `load_snowflake.py` | Résout `merchant_key`/`customer_key`/`pm_key`/`geo_key` au chargement, pas à la lecture — les requêtes BI n'ont pas à faire ce recherche |
 
 ---
 
@@ -145,5 +145,5 @@ choix délibéré pour garder le MVP simple : le schéma est prêt pour cette
   agrégats — l'ETL est un script batch quotidien (`make snowflake-export`),
   pas un pipeline Snowflake natif
 - `dim_date` pré-peuplée statiquement (2020-2029) plutôt que générée à la
-  demande — trade-off simplicité vs. flexibilité, suffisant pour l'horizon
+  demande — compromis simplicité vs. flexibilité, suffisant pour l'horizon
   du projet

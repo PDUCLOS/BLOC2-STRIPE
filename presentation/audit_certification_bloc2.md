@@ -82,8 +82,8 @@ Vos documents mélangent les deux codes :
      - les noms des dimensions ne correspondent pas au code : le code a `dim_payment_method` et `dim_geography`, la slide `dim_payment` et `dim_currency` ;
      - « partitionnement par mois » : Snowflake fait du **clustering** `(date_key, merchant_key)` ;
      - `mv_daily_revenue` est une vue **PostgreSQL**, pas une vue OLAP.
-   - **Slide 9** : `ml_features` n'est pas « par transaction ». C'est un **snapshot par client**, mis à jour en upsert sur `customer_id`. Les 3 cartes oublient `transaction_logs`, `fraud_alerts` et `ml_monitoring`.
-   - **Slide 10** : remplacer « 5 règles → score » et « Cible : SageMaker XGBoost » par « Règles **ou** XGBoost (fallback automatique) · MLflow · Evidently · réentraînement auto », et ajouter les métriques.
+   - **Slide 9** : `ml_features` n'est pas « par transaction ». C'est un **instantané par client**, mis à jour en upsert sur `customer_id`. Les 3 cartes oublient `transaction_logs`, `fraud_alerts` et `ml_monitoring`.
+   - **Slide 10** : remplacer « 5 règles → score » et « Cible : SageMaker XGBoost » par « Règles **ou** XGBoost (repli automatique) · MLflow · Evidently · réentraînement auto », et ajouter les métriques.
    - **Slide 11** : ajouter Airflow, MLflow et Evidently dans la colonne PoC.
    - **Slide 4** : un bandeau « PAS DANS LE PIPELINE LIVE » reste visible sur Snowflake. C'est honnête, mais le point 5 peut le supprimer.
 4. **Code RNCP** : harmoniser partout (voir plus haut).
@@ -109,7 +109,7 @@ Vos documents mélangent les deux codes :
     Corriger la colonne en `country` et ajouter `m.name` et `m.email` à l'extraction et à l'INSERT.
 11. **`tests/test_e2e.py:33`** : `MONGO_URI` retombe sur `stripe_app:stripe_pass`. Or `.env` ne définit pas `MONGO_URI` et `init_env.sh` génère des mots de passe aléatoires, donc les tests Mongo échoueront. Il faut construire l'URI à partir de `MONGO_APP_USER`, `MONGO_APP_PASSWORD` et `MONGO_DB`.
 12. **Métriques obsolètes dans `PRESENTATION.md` §11** : le document affiche F1 0,93 et AUC 0,985 sur 810 transactions. Le modèle actuel (`fraud_xgboost-v1.meta.json`, 15/09) donne :
-    - **précision 0,81 · recall 0,96 · F1 0,88 · AUC 0,98 sur 4 923 transactions de test** ;
+    - **précision 0,81 · rappel 0,96 · F1 0,88 · AUC 0,98 sur 4 923 transactions de test** ;
     - l'affirmation « 100 % des 5 % injectés » est à retirer.
 13. **Taux de fraude du jeu de test : 23 %** (1 154 / 4 923), alors que le générateur en injecte 5 %. Préparez l'explication (injections des tests E2E ? patterns de vélocité ?). La précision serait plus basse avec 5 % de fraude.
 14. **Autres incohérences dans `PRESENTATION.md`** :
@@ -147,5 +147,5 @@ Vos documents mélangent les deux codes :
 
 - Le PoC fonctionne réellement de bout en bout : CDC, scoring, write-back idempotent, DLQ, dashboard et tests.
 - Les compromis sont documentés honnêtement (Flink sur ARM64, Snowflake en dry-run, pas de rechargement à chaud du modèle, gap analysis sécurité) : un jury d'architectes apprécie.
-- La chaîne MLOps est complète : double moteur avec fallback, MLflow Registry, et Evidently qui surveille à la fois la dérive et la performance.
+- La chaîne MLOps est complète : double moteur avec repli, MLflow Registry, et Evidently qui surveille à la fois la dérive et la performance.
 - Le RGPD est appliqué « par construction » : TTL, `anonymize_customer()`, empreinte SHA-256, rôle `analytics_reader`.
