@@ -60,15 +60,14 @@ Des index TTL purgent les logs après 90 jours : le RGPD est appliqué par la ba
 Le cœur du projet : la fraude en temps réel, avec un objectif de décision sous 100 millisecondes.
 Deux moteurs : des règles, et un modèle **XGBoost**. Si le modèle manque, on revient automatiquement aux règles.
 Au-delà de 0,6, revue. Au-delà de 0,85, blocage.
-Sur près de 4 900 transactions de test, le modèle détecte **96 % des fraudes**, avec 81 % de précision.
+En production locale, sur le trafic réellement scoré, le modèle bloque **96 % des fraudes** avec **93 % de précision**. Chaque décision de blocage laisse une trace dans la table `fraud_indicators`, écrite dans la même transaction que le score.
 Chaque entraînement est tracé dans **MLflow**. **Evidently** surveille la dérive et la performance, et relance un entraînement si la qualité baisse.
 
 ### Slide 11 — Du PoC local à la cible cloud · 4:10 → 4:45
 
 Pour tenir le budget, j'ai construit un PoC local, mais complet.
-La cible cloud garde la même logique ; seuls les composants changent : RDS Multi-AZ, MSK, Atlas, Managed Flink, MWAA et SageMaker.
-Le tout est provisionné avec **Terraform**, sécurisé par KMS, IAM et Secrets Manager, et piloté en FinOps : tags, dimensionnement au plus juste, stockage chaud et froid.
-*[Ne dites « Terraform » que si le dossier `terraform/` est dans le dépôt, voir l'audit, point 1. Sinon, dites : « Le docker-compose est mon IaC locale ; la cible est spécifiée pour Terraform. »]*
+La cible cloud garde la même logique ; seuls les composants changent : RDS Multi-AZ, MSK, ElastiCache, Atlas en PrivateLink, ECS Fargate et MWAA.
+Elle est écrite en **Terraform** dans le dépôt : dix modules, validés à chaque push par la CI, mais jamais appliqués faute de compte AWS. Sécurité par KMS, IAM et Secrets Manager ; FinOps chiffré à environ 3 100 dollars par mois en prod, avec un budget et des alertes dans le code.
 
 ### Slide 12 — En résumé · 4:45 → 5:00
 
@@ -86,7 +85,9 @@ Merci. Je suis prêt pour la démonstration et vos questions.
 | **Que devient un message invalide ?** | Il part dans la dead-letter queue `stripe.etl.dead-letter`, avec le topic, l'offset et l'erreur. On ne perd pas le message et le pipeline continue. |
 | **Comment gérez-vous le droit à l'effacement ?** | La fonction PL/pgSQL `anonymize_customer()` anonymise le client sans casser les clés étrangères. Côté Mongo, les TTL purgent les logs à 90 jours et les interactions à 30 jours. |
 | **Pourquoi un schéma en étoile plutôt qu'en flocon ?** | Il demande moins de jointures, les requêtes BI sont plus simples, et le stockage colonne de Snowflake rend la dénormalisation peu coûteuse. |
-| **Votre recall est de 96 %, mais avec quelle proportion de fraude ?** | *[À préparer : le jeu de test compte 1 154 fraudes sur 4 923 transactions, soit 23 %. Le générateur en injecte 5 %. Expliquez l'écart, et rappelez qu'à 5 % de fraude, la précision réelle serait plus basse.]* |
+| **Votre rappel est de 96 %, mais avec quelle proportion de fraude ?** | Environ 25 % dans le trafic scoré, alors que le générateur tire 5 % des transactions en fraude : chaque fraude déclenche une rafale de transactions sur le même client. Avec un taux réel de 0,1 à 0,5 %, la précision baisserait à rappel égal ; c'est pourquoi je mesure la précision servie en continu. |
 | **Quelle est la haute disponibilité en local ?** | Aucune : le PoC tourne avec un seul broker et un facteur de réplication de 1, par choix. La cible utilise MSK avec un facteur de réplication de 3 et `min.insync.replicas=2`, RDS Multi-AZ avec un failover de moins de 30 s, et un replica set Atlas. |
-| **Combien coûterait la cible ?** | *[À préparer : un ordre de grandeur mensuel, voir l'audit, point 9.]* |
-| **Que se passe-t-il après un réentraînement ?** | Le nouveau modèle est enregistré dans MLflow, mais le scorer en cours garde l'ancien en mémoire jusqu'à son redémarrage. Le rechargement à chaud est une amélioration identifiée. |
+| **Combien coûterait la cible ?** | Environ 3 100 $/mois en prod et 1 000 $ en dev, en prix à la demande (`docs/FINOPS.md`). Les quatre bases managées pèsent 65 %. Remplacer MWAA par EventBridge et prendre des engagements 1 an ramène la prod vers 2 400 $. |
+| **Que se passe-t-il après un réentraînement ?** | Le modèle est enregistré dans MLflow et le scorer le recharge dès que le fichier change (contrôle de date de modification dans `ml/scoring.py`). Le 15/09, un réentraînement automatique a fait chuter la précision offline à 0,77 alors que la précision servie restait à 0,98 : je juge donc un modèle sur les deux mesures, pas sur l'offline seule. |
+| **Votre Terraform a-t-il été testé ?** | Validé par `terraform validate` en CI sur dev, prod et le bootstrap du state, mais jamais appliqué : il faudrait un compte AWS et Atlas. Je l'assume comme une limite du PoC. |
+| **Où sont vos requêtes ?** | Dans `queries/` : SQL PostgreSQL et MongoDB exécutées sur la stack par `make queries-check` à chaque push ; les requêtes Snowflake sont alignées sur le schéma mais non exécutées. |

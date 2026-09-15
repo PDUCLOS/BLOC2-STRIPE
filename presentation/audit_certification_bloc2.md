@@ -2,6 +2,28 @@
 
 *Relecture du 15 septembre 2026 : dépôt `Projet bloc 2` (commit eeca50d), slides `presentation/stripe_presentation_bloc2.pptx`, document des compétences et énoncé Stripe. Jury le 3 octobre, soit dans 18 jours.*
 
+## Mise à jour du 15 septembre 2026 (soir) — état des actions
+
+| Action de l'audit | Statut | Où |
+|---|---|---|
+| P0.1 Terraform (C4) | ✅ Écrit et validé en CI, non appliqué | `terraform/`, job CI `terraform`, `make tf-validate` |
+| P0.2 Vidéo | ⏳ À réenregistrer par le candidat | Script : `presentation/script_video_bloc2.md` |
+| P0.3 Slides alignées | ✅ | `stripe_presentation_bloc2.pptx` (diagrammes à jour, slide cible AWS, métriques servies) |
+| P0.4 Code RNCP harmonisé | ✅ RNCP41993 partout (docs, slides, docx) | — |
+| P1.5 Snowflake réel | ⏳ Compte à ouvrir ; étapes documentées | README, « Passer à un compte Snowflake payant » |
+| P1.6 `fraud_indicators` alimentée | ✅ Écrite par le scorer, dans la même transaction que le score ; testée | `producers/flink_like_job.py`, `tests/test_e2e.py` |
+| P1.7 Requêtes dans le dépôt et testées | ✅ | `queries/`, `make queries-check` (CI) |
+| P1.8 Diagramme physique AWS | ✅ | `presentation/stripe_aws_cible.drawio` |
+| P1.9 Chiffrage FinOps | ✅ ~3 100 $/mois prod, ~1 000 $ dev, 5 leviers | `docs/FINOPS.md` |
+| P2.10-11 Bugs `load_snowflake.py`, `MONGO_URI` | ✅ Corrigés avant cette mise à jour | — |
+| P2.12-14 `PRESENTATION.md` obsolète | ✅ Métriques, broker, onglets, moteur ML | `docs/PRESENTATION.md` |
+| P2.15 Documents Word | ✅ Régénérés sur l'implémentation réelle | `stripe_architecture_bloc2.docx`, `stripe_bloc2_competences.docx`, `generators/` |
+| Nouveau : `anonymize_customer()` documentée mais absente | ✅ Implémentée | `init/postgres/02_rgpd.sql` |
+
+Les sections ci-dessous sont l'audit d'origine, conservé pour la traçabilité.
+
+---
+
 ## Référentiel à retenir
 
 Le titre **RNCP41993 « Architecte en intelligence artificielle »** (Jedha) est enregistré depuis le 27/02/2026 et **remplace le RNCP38777**. Son bloc 2 s'intitule « Concevoir et déployer l'infrastructure de données et de calcul pour l'IA ».

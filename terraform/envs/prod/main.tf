@@ -51,7 +51,7 @@ module "stack" {
   image_tag            = var.image_tag
 
   alert_email        = var.alert_email
-  monthly_budget_usd = 6500
+  monthly_budget_usd = 4000
 
   tags = local.tags
 }

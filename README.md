@@ -181,7 +181,9 @@ docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
 │   ├── test_e2e.py           # test end-to-end (nécessite la stack Docker)
 │   └── test_ml_model.py      # tests du module ml/ (sans Docker)
 ├── flink/                    # Dockerfile + requirements (PyFlink custom)
-└── docs/                     # PRESENTATION, ARCHITECTURE, sécurité, ML, OLAP, NoSQL
+├── queries/                  # livrable 8 : requêtes SQL (OLTP, OLAP Snowflake) et MongoDB
+├── terraform/                # IaC de la cible AWS (modules + envs dev/prod), validée en CI
+└── docs/                     # PRESENTATION, ARCHITECTURE, sécurité, ML, MLOps, FinOps, OLAP, NoSQL
 ```
 
 ## Scénario de démo (3 minutes)
@@ -198,9 +200,9 @@ docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
    - Ouvrir `stripe.fraud.alerts` pour illustrer les cas bloqués et les alertes métier.
    - Contrôler Redis pour prouver que les features temps réel sont mises à jour en parallèle du scoring.
 5. **Dashboard (1min)** : basculer sur http://localhost:8501 pour relier les données techniques à une lecture métier.
-   - Page Overview : KPIs temps réel et répartition des décisions.
-   - Page Live Transactions : flux en direct, avec un code couleur basé sur le score.
-   - Page Fraud Alerts : alertes consolidées depuis MongoDB.
+   - Écran de login : l'accès au dashboard est protégé (hash du mot de passe dans `.env`, blocage après plusieurs échecs).
+   - Onglet Vue d'ensemble : KPIs temps réel, transactions suspectes, alertes consolidées depuis MongoDB.
+   - Onglet Performance ML : dérive, précision/rappel servis, comparaison règles vs XGBoost.
 6. **Test E2E (15s)** : `make test` pour montrer que le parcours complet est vérifiable automatiquement.
 7. **Snowflake (optionnel, 30s)** : si les credentials sont renseignés dans `.env`, lancer `make snowflake-export` pour montrer l'étape analytique batch.
 
@@ -213,6 +215,16 @@ J'ai tenté de builder une image Flink custom (PyFlink + connecteur Kafka + Redi
 **Solution retenue** : un job Python "Flink-like" (`producers/flink_like_job.py`) qui fait EXACTEMENT la même chose qu'un job PyFlink DataStream (source Kafka → enrich Redis → score → sink Kafka). Logique métier identique, juste l'API change. Pour la PROD : on déploie ce job via Flink standalone (sans Docker) ou KDA.
 
 **Commentaire précis** : cette décision est un compromis de démonstration locale (stabilité sur Mac ARM64) et non une limitation de l'architecture cible en production.
+
+### Projet sur Google Drive : attention au venv
+
+Le dépôt local est dans un dossier Google Drive. Si les fichiers de `.venv/`
+sont en « streaming » (non disponibles hors connexion), un `import` Python
+peut bloquer indéfiniment : c'est ce qui est arrivé à `producers/mongo_writer.py`,
+figé sur `import kafka` sans aucun message. Deux solutions : marquer `.venv/`
+« Disponible hors connexion » dans Google Drive, ou créer le venv hors du
+Drive (`python3.11 -m venv ~/.venvs/stripe-bloc2`) et y pointer `PYTHON` dans
+le Makefile.
 
 ### Pourquoi 2 ports Kafka (9092 + 29092) ?
 
@@ -253,8 +265,14 @@ make status
 ## Tests
 
 ```bash
-# Test E2E complet (5 étapes)
+# Test E2E complet (16 contrôles : Postgres, Redis, Mongo, pipeline + fraud_indicators)
 make test
+
+# Exécute toutes les requêtes de queries/ sur la stack (échoue à la première erreur)
+make queries-check
+
+# Vérifie le code Terraform sans compte AWS (fmt + validate)
+make tf-validate
 
 # Smoke tests rapides
 make smoke
@@ -268,7 +286,8 @@ make smoke
 
 GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
 monte la stack complète sur le runner à chaque push/PR (pas de mocks) et
-lance `make test` + `make notebook-check` (audit données/ML). Cycle de vie
+lance `make test`, `make queries-check` et `make notebook-check` (audit
+données/ML) ; un job séparé valide `terraform/` (`fmt` + `validate`). Cycle de vie
 du modèle, monitoring, réentraînement automatique et incidents documentés :
 **[docs/MLOPS.md](docs/MLOPS.md)**.
 
@@ -276,6 +295,23 @@ du modèle, monitoring, réentraînement automatique et incidents documentés :
 # Reproduire la CI en local — mêmes commandes, pas de réimplémentation
 make init && make test && make notebook-check
 ```
+
+## Infrastructure as Code (Terraform)
+
+La cible cloud présentée en soutenance est écrite en Terraform dans
+[`terraform/`](terraform/README.md) : VPC 3 AZ, RDS PostgreSQL Multi-AZ, MSK,
+ElastiCache, MongoDB Atlas en PrivateLink, ECS Fargate, MWAA, S3, KMS,
+Secrets Manager, alarmes et budget. Le code est **validé** (`make tf-validate`,
+job CI `terraform`) mais **jamais appliqué** : aucun compte AWS n'est rattaché
+au projet. Coûts estimés et leviers d'optimisation : [docs/FINOPS.md](docs/FINOPS.md).
+
+## Requêtes SQL et NoSQL
+
+| Fichier | Moteur | Exécuté par `make queries-check` |
+|---|---|---|
+| [`queries/postgres_oltp.sql`](queries/postgres_oltp.sql) | PostgreSQL 16 : revenu, décisions fraude, précision servie, RFM, vélocité, vues matérialisées, EXPLAIN, RGPD sous ROLLBACK | Oui |
+| [`queries/mongodb_queries.js`](queries/mongodb_queries.js) | MongoDB 7 : alertes, règles déclenchées, logs, feature store, monitoring ML, index TTL | Oui |
+| [`queries/snowflake_olap.sql`](queries/snowflake_olap.sql) | Snowflake : schéma en étoile, fenêtres, Dynamic Table | Non (Snowflake en dry-run) |
 
 ## Prérequis
 
@@ -291,3 +327,35 @@ Pour activer l'export batch vers Snowflake :
 2. Remplis `SNOWFLAKE_ACCOUNT`, `SNOWFLAKE_USER`, `SNOWFLAKE_PASSWORD` dans `.env`
 3. Lance `make snowflake-setup` (crée warehouse + schéma)
 4. Lance `make snowflake-export` (extract Postgres → load Snowflake)
+5. Exécute `snowsql -f queries/snowflake_olap.sql` pour les requêtes analytiques
+
+### Passer à un compte Snowflake payant (production)
+
+Le compte d'essai suffit pour une démonstration (30 jours, 400 $ de crédits).
+Pour un usage réel, voici les étapes et ce qui change dans le projet :
+
+1. **Compte** : édition *Enterprise* (requise pour le masquage dynamique des
+   colonnes sensibles et la rétention Time Travel de 90 jours), hébergée sur
+   AWS `eu-west-1`, dans la même région que la cible Terraform pour éviter
+   les frais de sortie de données.
+2. **Authentification par paire de clés** au lieu du mot de passe : générer une
+   clé RSA, l'associer à un utilisateur de service (`ALTER USER ... SET
+   RSA_PUBLIC_KEY`), stocker la clé privée dans AWS Secrets Manager (lue par
+   le DAG MWAA) et remplacer `SNOWFLAKE_PASSWORD` par le chemin de la clé dans
+   `etl/load_snowflake.py`.
+3. **Moindre privilège** : un rôle `LOADER` (écriture sur le schéma
+   analytique, utilisé par Airflow) et un rôle `ANALYST` (lecture seule), à la
+   place du rôle d'administration utilisé en essai.
+4. **Réseau** : *network policy* n'autorisant que les IP de sortie des NAT
+   Gateway AWS, ou AWS PrivateLink (édition *Business Critical*).
+5. **Coûts** : warehouse X-Small, `AUTO_SUSPEND = 60`, *resource monitor*
+   plafonnant les crédits mensuels. Environ 180 $/mois pour l'export
+   quotidien et un usage BI modéré (détail dans [docs/FINOPS.md](docs/FINOPS.md)).
+6. **Pré-agrégats** : créer la Dynamic Table `dt_daily_revenue`
+   (`queries/snowflake_olap.sql` §5).
+7. **Orchestration** : le DAG `dags/stripe_daily_etl.py` s'exécute tel quel
+   sur MWAA (module `terraform/modules/airflow`), avec les secrets Snowflake
+   dans Secrets Manager.
+
+Tant que ces étapes ne sont pas faites, Snowflake reste en dry-run et n'est
+pas présenté comme branché au pipeline live.

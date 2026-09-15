@@ -75,7 +75,7 @@ booléennes `r1`, `r2`, `r3`... : le nombre de règles peut évoluer (ajout
 d'une R6 sans migration de schéma) et une requête d'agrégation
 (`$unwind` + `$group`) permet de compter facilement la fréquence de
 déclenchement par règle — cas d'usage typique de l'équipe Risk (identifié
-dans `stripe_queries_nosql.js`).
+dans [`queries/mongodb_queries.js`](../queries/mongodb_queries.js) §2).
 
 **Relation avec `transaction_logs`** : `fraud_alerts` est un
 **sous-ensemble filtré et dénormalisé** de ce qui existe déjà dans
@@ -163,7 +163,7 @@ n'est pas prévisible à l'avance (texte libre, pièces jointes potentielles).
 
 **Principe appliqué** : chaque index composé a été choisi pour matcher un
 pattern de requête réel du code (`dashboard/app.py`,
-`stripe_queries_nosql.js`), pas ajouté de façon préventive — un index
+[`queries/mongodb_queries.js`](../queries/mongodb_queries.js), exécuté par `make queries-check`), pas ajouté de façon préventive — un index
 inutilisé coûte en écriture (chaque insert doit le maintenir) sans jamais
 apporter de bénéfice en lecture.
 

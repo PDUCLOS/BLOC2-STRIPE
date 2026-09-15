@@ -185,11 +185,45 @@ Toutes les requêtes SQL sont `@st.cache_data(ttl=3)` — évite de re-requêter
 
 ---
 
+## `queries/` — Livrable 8 : requêtes SQL et NoSQL
+
+Exécutées sur la stack par `make queries-check` (et en CI), sauf Snowflake.
+
+| Fichier | Contenu | Données lues (source) |
+|---|---|---|
+| [`postgres_oltp.sql`](../queries/postgres_oltp.sql) | 9 requêtes : top marchands, décisions par moyen de paiement, précision/rappel servis, RFM, vélocité 1 h, remboursements en attente, vues matérialisées, EXPLAIN idempotence, RGPD sous ROLLBACK | `transactions` (producer + write-back scorer), `fraud_indicators` (scorer), `merchants`/`customers`/`payment_methods` (seed), `mv_*` (refresh_views) |
+| [`mongodb_queries.js`](../queries/mongodb_queries.js) | 11 requêtes : alertes par décision/modèle, règles déclenchées, pays, volume horaire, historique d'une transaction, feature store, monitoring ML, latence et erreurs, index TTL | `fraud_alerts`, `transaction_logs`, `logs`, `ml_features` (mongo_writer.py), `ml_monitoring` (ml/monitor.py) |
+| [`snowflake_olap.sql`](../queries/snowflake_olap.sql) | 5 requêtes étoile : région/trimestre, wallets vs cartes, pays à risque, GMV mois sur mois (LAG), Dynamic Table `dt_daily_revenue` | `fact_transactions` + `dim_*` (etl/load_snowflake.py) — **non exécuté**, dry-run |
+
+---
+
+## `terraform/` — Infrastructure as Code de la cible AWS
+
+Validé (`make tf-validate`), jamais appliqué. Détail : [terraform/README.md](../terraform/README.md).
+
+| Chemin | Rôle |
+|---|---|
+| [`bootstrap/main.tf`](../terraform/bootstrap/main.tf) | Bucket S3 versionné et chiffré du state Terraform |
+| [`stack/main.tf`](../terraform/stack/main.tf) | Composition des modules, alarmes CloudWatch (CPU RDS, lag du scorer), SNS, budget mensuel |
+| [`envs/dev/main.tf`](../terraform/envs/dev/main.tf), [`envs/prod/main.tf`](../terraform/envs/prod/main.tf) | Dimensionnement par environnement, backend S3, tags de coût |
+| [`modules/network`](../terraform/modules/network/main.tf) | VPC 3 AZ, sous-réseaux public/app/data, NAT, endpoint S3, Flow Logs |
+| [`modules/security`](../terraform/modules/security/main.tf) | CMK KMS, Secrets Manager, security groups par service, rôles IAM ECS |
+| [`modules/rds`](../terraform/modules/rds/main.tf) | PostgreSQL 16 Multi-AZ, réplication logique (CDC), TLS forcé, réplica |
+| [`modules/msk`](../terraform/modules/msk/main.tf) | Kafka 3 brokers, RF 3, IAM + TLS, création auto de topics désactivée |
+| [`modules/elasticache`](../terraform/modules/elasticache/main.tf) | Redis 7 Multi-AZ chiffré (feature store vélocité) |
+| [`modules/mongodb_atlas`](../terraform/modules/mongodb_atlas/main.tf) | Cluster Atlas 7, PrivateLink, utilisateur `stripe_app` en `readWrite` |
+| [`modules/storage`](../terraform/modules/storage/main.tf) | Buckets data lake et DAGs, SSE-KMS, TLS obligatoire, cycle de vie |
+| [`modules/compute`](../terraform/modules/compute/main.tf) | ECR + ECS Fargate ARM64 : scorer, mongo-writer, ml-monitor, dashboard |
+| [`modules/airflow`](../terraform/modules/airflow/main.tf) | MWAA pour `dags/stripe_daily_etl.py` |
+
+---
+
 ## Fichiers non-Python (schéma, config)
 
 | Fichier | Contenu | Lien |
 |---|---|---|
 | `init/postgres/01_ddl.sql` | 6 tables, index, triggers, publication Debezium, vues matérialisées, rôles `replication_user`/`analytics_reader` | [→](../init/postgres/01_ddl.sql) |
+| `init/postgres/02_rgpd.sql` | Fonction `anonymize_customer(uuid)` : droit à l'effacement sans suppression (client anonymisé, transactions détachées) | [→](../init/postgres/02_rgpd.sql) |
 | `init/mongo/01_init_collections.js` | 7 collections, index, TTL RGPD | [→](../init/mongo/01_init_collections.js) |
 | `init/mongo/02_app_user.js` | Utilisateur applicatif Mongo | [→](../init/mongo/02_app_user.js) |
 | `config/debezium-connector.json` | Config connecteur CDC (template) | [→](../config/debezium-connector.json) |
@@ -205,3 +239,4 @@ Toutes les requêtes SQL sont `@st.cache_data(ttl=3)` — évite de re-requêter
 - [`presentation/stripe_code_structure.drawio`](../presentation/stripe_code_structure.drawio) — ce document, en version visuelle (fichier → fonctions → imports)
 - [`presentation/stripe_erd_oltp.drawio`](../presentation/stripe_erd_oltp.drawio) — schéma Postgres
 - [`presentation/stripe_mongodb_structure.drawio`](../presentation/stripe_mongodb_structure.drawio) — schéma MongoDB
+- [`presentation/stripe_aws_cible.drawio`](../presentation/stripe_aws_cible.drawio) — architecture physique de la cible AWS, fidèle à `terraform/envs/prod` (généré par `presentation/generators/gen_aws_drawio.py`)

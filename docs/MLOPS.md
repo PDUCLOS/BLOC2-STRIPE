@@ -44,12 +44,12 @@ détail de chaque étape plutôt que de le dupliquer.
 ## 2. CI/CD (GitHub Actions)
 
 [`​.github/workflows/ci.yml`](../.github/workflows/ci.yml) — déclenché sur
-push/PR vers `main`. Deux jobs :
+push/PR vers `main`. Trois jobs :
 
 ### 2.1 — `lint` (quelques secondes, sans Docker)
 
 - Compile tous les `.py` du repo (`python -m py_compile`)
-- Valide le bon format XML des 4 diagrammes `presentation/*.drawio`
+- Valide le bon format XML des 5 diagrammes `presentation/*.drawio`
 - Valide `docker-compose.yml` (`docker compose config -q`)
 
 ### 2.2 — `e2e` (~10-15 min, stack complète)
@@ -66,10 +66,13 @@ vrai plutôt que resimuler) :
 6. Producer + scorer (`flink_like_job.py`, moteur à **règles** — pas besoin
    d'entraîner XGBoost en CI, le modèle est testé séparément par le
    notebook quand il existe) en tâche de fond, 20s de trafic
-7. `make test` — les 16 assertions de `tests/test_e2e.py`
-8. `make notebook-check` — exécute `notebooks/audit_data_ml.ipynb` de bout
+7. `make test` — les 16 assertions de `tests/test_e2e.py` (dont la présence
+   d'une ligne `fraud_indicators` pour une transaction bloquée)
+8. `make queries-check` — exécute `queries/postgres_oltp.sql` et
+   `queries/mongodb_queries.js` : une requête désalignée du schéma casse la CI
+9. `make notebook-check` — exécute `notebooks/audit_data_ml.ipynb` de bout
    en bout ; échoue si un `assert` du notebook échoue (cf. §4)
-9. Logs Docker dumpés automatiquement si un step échoue ; nettoyage
+10. Logs Docker dumpés automatiquement si un step échoue ; nettoyage
    (`docker compose down -v`) dans tous les cas (`if: always()`)
 
 **Ce que ça garantit à chaque push** : le code compile, le schéma Postgres
@@ -89,6 +92,14 @@ soutenance mais pas nécessaires pour valider chaque commit, et Snowflake
 d'intégration possible sans credentials.
 
 ---
+
+### 2.3 — `terraform` (sans compte AWS)
+
+`terraform fmt -check` puis `init -backend=false` + `validate` sur
+`terraform/bootstrap`, `envs/dev` et `envs/prod` : vérifie types, références
+entre modules et arguments des providers AWS/Atlas. Pas de `plan` ni
+d'`apply` en CI tant qu'aucun compte cible n'existe (il faudrait une
+fédération OIDC GitHub → AWS). Détail : [terraform/README.md](../terraform/README.md).
 
 ## 3. Cycle de vie du modèle — résumé
 
@@ -236,6 +247,30 @@ correctif hâtif sans recul)** :
   vraie dérive à corriger par un nouveau modèle)
 
 ---
+
+### 5.3 — Métrique offline en chute après un réentraînement automatique, performance servie intacte (2026-09-15)
+
+**Symptôme** : après un redémarrage complet de Docker, `ml-monitor` mesure une
+dérive de 0,43 (> 0,3) et relance l'entraînement à 17:10 UTC. Le nouveau
+`fraud_xgboost-v1.meta.json` affiche une précision offline de **0,77**, contre
+**0,95** pour le run de 15:53.
+
+**Vérification sur ce qui est réellement servi** (`queries/postgres_oltp.sql`
+§3, par minute) : précision servie 0,93 à 0,99 avant **et** après le
+rechargement du modèle (17:11 : 185 VP, 2 FP ; 17:12 : 124 VP, 2 FP).
+
+**Explication** : le split temporel 80/20 place la fenêtre la plus récente
+dans le test. Cette fenêtre contient le redémarrage : Redis vide (vélocités à
+reconstruire par `_backfill_velocity`) et rafales de trafic de rattrapage du
+producteur. Le test offline est donc biaisé vers le cas le plus difficile,
+et ne représente pas le trafic en régime établi.
+
+**Décision** : ne pas bloquer le déploiement sur la seule métrique offline.
+La promotion d'un modèle réentraîné doit comparer (1) la métrique offline,
+(2) la précision servie sur une fenêtre stable après rechargement. Piste
+d'amélioration notée : exclure du jeu d'entraînement les minutes qui suivent
+un redémarrage de la stack, ou exiger un nombre minimal de minutes « chaudes »
+avant de déclencher un réentraînement sur dérive.
 
 ## 6. Ce qui reste hors périmètre MLOps
 

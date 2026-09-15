@@ -37,8 +37,8 @@ terraform/
 ├── modules/            un module par brique, réutilisable
 ├── stack/              composition de tous les modules + observabilité/FinOps
 └── envs/
-    ├── dev/            petites tailles, 1 NAT, pas de Multi-AZ RDS (~900 $/mois)
-    └── prod/           Multi-AZ partout, NAT par AZ, réplica (~6 500 $/mois)
+    ├── dev/            petites tailles, 1 NAT, pas de Multi-AZ RDS (~1 000 $/mois)
+    └── prod/           Multi-AZ partout, NAT par AZ, réplica (~3 100 $/mois)
 ```
 
 Les chiffrages de budget sont détaillés dans [`docs/FINOPS.md`](../docs/FINOPS.md).

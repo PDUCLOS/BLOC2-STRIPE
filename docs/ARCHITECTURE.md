@@ -1,6 +1,6 @@
 # Stripe Polyglot — Documentation complète du projet
 
-> **Bloc 2 — Certification Jedha Architecte en IA (RNCP 38777)**
+> **Bloc 2 — Certification Jedha Architecte en intelligence artificielle (RNCP41993)**
 > Démo end-to-end d'une plateforme de paiement polyglot avec détection de fraude temps réel.
 >
 > Cette doc est l'**index central** du projet. Chaque section a des liens rapides (TOC) et
@@ -162,7 +162,7 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 
 ### 2.2 — Logique du pipeline de fraude
 
-Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
+Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`, modèle `xgboost-v1`, cf. [ML_INTEGRATION_STRATEGY.md](ML_INTEGRATION_STRATEGY.md)) avec **repli automatique** sur le moteur à règles **`rule-based-v1`** tant qu'aucun modèle n'est entraîné. Le moteur à règles (défaut, 5 règles à poids additifs) :
 
 | Règle | Code | Condition | Score |
 |---|---|---|---|
@@ -398,10 +398,10 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
      - **Features** : HSET `feat_<cid>` (last_amount, last_country, v1h, v24h).
      - **5 règles** (cf. §2.2) : `score += 0.35 / 0.15 / 0.40 / 0.25 / 0.15`, min(round, 4, 1.0).
      - **Décision** : `>= 0.85 → block`, `>= 0.60 → review`, sinon `allow`.
-     - Champs ajoutés : `fraud_score`, `decision`, `velocity_1h`, `velocity_24h`, `rules_triggered`, `model_version="rule-based-v1"`, `scored_at`.
+     - Champs ajoutés : `fraud_score`, `decision`, `velocity_1h`, `velocity_24h`, `rules_triggered`, `model_version` (`"rule-based-v1"` ou `"xgboost-v1"`), `scored_at`.
    - **Sink 1** : `stripe.payments.events` (toutes les txns scorées).
    - **Sink 2** : `stripe.fraud.alerts` (decision ∈ review/block).
-   - **Write-back PG** : `UPDATE transactions SET fraud_score = ... WHERE txn_id = ... AND fraud_score IS NULL` (Debezium capte ce changement → cycle maîtrisé).
+   - **Write-back PG** (une seule transaction) : `UPDATE transactions SET fraud_score = ... WHERE txn_id = ... AND fraud_score IS NULL`, puis, si la ligne a bien été modifiée et que la décision est `review`/`block`, `INSERT INTO fraud_indicators (txn_id, anomaly_score, rules_triggered, model_version, decision)`. Le filtre `IS NULL` rend l'ensemble idempotent : un message CDC rejoué (ou l'événement généré par ce même UPDATE) ne produit ni second score ni indicateur en double.
 4. Stats tous les 25 messages (count, alerts, writebacks, rate).
 5. Signal handler : arrêt gracieux.
 
@@ -1061,12 +1061,14 @@ rm -rf venv/
 
 ## Notes finales
 
-- **Mainteneur** : Patrice Duclos (RNCP 38777 Architecte en IA)
-- **Date de dernière mise à jour** : 2026-07-13
+- **Mainteneur** : Patrice Duclos (RNCP41993 Architecte en intelligence artificielle)
+- **Date de dernière mise à jour** : 2026-09-15
 - **Statut** : Démo fonctionnelle, prête soutenance
 - **Évolution future** :
   - Profil `flink` à stabiliser sur ARM64
-  - DAG Airflow (remplace `make snowflake-export`)
-  - Modèle ML scoring (remplace `rule-based-v1`)
+  - ~~DAG Airflow~~ fait (`dags/stripe_daily_etl.py`)
+  - ~~Modèle ML scoring~~ fait (XGBoost + MLflow + Evidently, cf. [MLOPS.md](MLOPS.md))
+  - ~~Infrastructure as Code~~ écrite et validée en CI (`terraform/`), à appliquer sur un compte AWS
+  - Debezium sur MSK Connect (plugin à packager) et Snowflake réel (compte payant)
   - Prometheus + Grafana pour l'observabilité
   - Schema Registry + Avro pour Kafka (au lieu de JSON)

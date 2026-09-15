@@ -1,6 +1,6 @@
 # Stripe Polyglot — Architecture de détection de fraude en temps réel
 
-> Projet Bloc 2 — Certification Jedha Architecte en IA (RNCP 38777)
+> Projet Bloc 2 — Certification Jedha Architecte en intelligence artificielle (RNCP41993)
 > Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Airflow · XGBoost · MLflow · Evidently
 >
 > **Snowflake n'est PAS branché dans le pipeline live de cette démo.**
@@ -53,7 +53,7 @@ Construire une plateforme de paiement capable de **détecter les transactions fr
 │                                       ▼                              │
 │                              ┌─────────────────┐                     │
 │                              │   Kafka 7.6     │  KRaft, 12 partitions│
-│                              │ (3 brokers)     │  retention 7-30j     │
+│                              │ (1 broker PoC)  │  retention 7-30j     │
 │                              └────────┬────────┘                     │
 │                                       │                              │
 └───────────────────────────────────────┼──────────────────────────────┘
@@ -108,12 +108,12 @@ Construire une plateforme de paiement capable de **détecter les transactions fr
 │                        COUCHE VISUALISATION                          │
 │                                                                       │
 │                              ┌─────────────────┐                     │
-│                              │  Streamlit 1.32 │  Dashboard 5 pages   │
-│                              │  (Python 3.11)  │  • Overview          │
-│                              │                 │  • Live Transactions │
-│                              │                 │  • Fraud Alerts      │
-│                              │                 │  • Customers         │
-│                              │                 │  • Pipeline Health   │
+│                              │  Streamlit 1.32 │  Login + 2 onglets   │
+│                              │  (Python 3.11)  │  • Vue d'ensemble    │
+│                              │                 │  • Performance ML    │
+│                              │                 │                      │
+│                              │                 │                      │
+│                              │                 │                      │
 │                              └─────────────────┘                     │
 │                                                                       │
 └──────────────────────────────────────────────────────────────────────┘
@@ -322,15 +322,12 @@ Trois raisons :
 **Pourquoi Streamlit (et pas Grafana ou un front React) ?**
 Pour une démo, Streamlit est imbattable : Python pur, auto-refresh, `st.metric()` pour les KPIs, intégration native Plotly. Pour de la prod BI, on passerait à Grafana (avec source Kafka/Postgres/Redis) ou à un front React.
 
-**5 pages :**
+**Accès protégé par login** (hash SHA-256 du mot de passe dans `.env`, anti-bruteforce), puis **2 onglets** (`dashboard/app.py`) :
 
-| Page | Données | Use case |
+| Onglet | Données (fonction → source) | Use case |
 |---|---|---|
-| **Overview** | KPIs agrégés, charts temps réel | Vue executive |
-| **Live Transactions** | Flux des dernières transactions scorées, color-coded par score | Veille opérationnelle |
-| **Fraud Alerts** | Liste des alertes MongoDB avec drill-down | Travail du risk analyst |
-| **Customers** | Top velocity (Redis), features (Redis) | Détection des comptes suspects |
-| **Pipeline Health** | Status de chaque service + topics Kafka | Monitoring infra |
+| **Vue d'ensemble** | `kpis_from_pg()`, `txn_over_time()`, `fraud_by_country()`, `top_merchants()`, `recent_suspicious()` → PostgreSQL (rôle `analytics_reader`) ; `fraud_alerts_mongo()` → MongoDB `fraud_alerts` ; `redis_stats()` → Redis | Vue executive + travail du risk analyst |
+| **Performance ML** | `ml_monitoring_latest()` / `ml_monitoring_history()` → MongoDB `ml_monitoring` ; `fraud_score_by_model_version()` → PostgreSQL | Dérive, précision/rappel servis, comparaison `rule-based-v1` vs `xgboost-v1` |
 
 **Auto-refresh modéré** (5s) : on évite de marteler la DB tout en gardant l'illusion du temps réel. Sur l'Overview, on pourrait utiliser `st.fragment` pour ne refetcher que les KPIs sans rerender toute la page.
 
@@ -552,7 +549,7 @@ Latence totale INSERT → décision visible dans le dashboard : **< 1 seconde**
 
 | Mécanisme | Implémentation |
 |---|---|
-| **Droit à l'effacement** (Art. 17) | `anonymize_customer(p_customer_id UUID)` PL/pgSQL : remplace email par `anonymized_<8chars>@deleted.invalid`, set `name='ANONYMIZED'`, set `fingerprint='REDACTED'`, détache `customer_id` des transactions existantes |
+| **Droit à l'effacement** (Art. 17) | `anonymize_customer(p_customer_id UUID)` PL/pgSQL ([`init/postgres/02_rgpd.sql`](../init/postgres/02_rgpd.sql), démontrée sous ROLLBACK dans [`queries/postgres_oltp.sql`](../queries/postgres_oltp.sql) §9) : remplace email par `anonymized_<8chars>@deleted.invalid`, set `name='ANONYMIZED'`, set `fingerprint='REDACTED'`, détache `customer_id` des transactions existantes |
 | **Limitation de durée** (Art. 5(1)(e)) | TTL MongoDB : 90j sur `transaction_logs`, 30j sur `user_interactions`. Pas de script cron à maintenir. |
 | **Pseudonymisation** (Art. 4(5)) | `payment_methods.fingerprint` = hash SHA-256, jamais le PAN. `metadata` ne stocke pas de PII direct. |
 | **Sécurité par défaut** (Art. 25) | `analytics_reader` role n'a pas accès à `fingerprint`. `stripe_app` n'a accès qu'à `readWrite` sur `stripe_nosql`, pas admin. |
@@ -729,7 +726,7 @@ conditions réelles (stack Docker complète) :
 
 ### Limites assumées (15s)
 
-> "Flink custom Docker ne build pas sur Mac M-series ARM64 — bug connu de numpy/JDK. Pour la démo, un job Python 'Flink-like' fait la même logique DataStream. En prod, Flink standalone. Le modèle de scoring est rule-based ; en prod on entraînerait un XGBoost sur les `fraud_indicators` réelles."
+> "Flink custom Docker ne build pas sur Mac M-series ARM64 — bug connu de numpy/JDK. Pour la démo, un job Python 'Flink-like' fait la même logique DataStream. En prod, Managed Flink. Le scoring tourne en XGBoost avec repli automatique sur les règles, mais les labels viennent du générateur synthétique : en production, il faudrait des chargebacks confirmés. Et l'infra cloud est écrite en Terraform et validée, jamais appliquée faute de compte."
 
 ---
 
@@ -739,8 +736,9 @@ conditions réelles (stack Docker complète) :
 |---|---|---|
 | Latence INSERT → décision | < 1s | INSERT + chrono + voir l'alerte dans le dashboard |
 | Throughput | 5 txns/s (démo) → 1000+ en prod | Compteur dans Flink-like : `[1500 txns, 45 alerts] rate=4.8/s` |
-| Taux de fraude détecté | 100% des 5% injectés | Le test E2E insère 1 frauduleuse, génère 1 alerte |
-| Performance modèle ML | F1 fraude 0.93, ROC AUC 0.985 (mesuré sur 810 txns réelles, split temporel 80/20) | `make ml-train`, ou onglet "Performance ML" du dashboard |
+| Détection d'une fraude évidente | Le test E2E insère une transaction à 1 500 € depuis un pays à risque : score ≥ 0,85, `block` et ligne `fraud_indicators` vérifiés | `make test` |
+| Performance **servie** du modèle (live) | Précision 0,93 · rappel 0,96 sur 13 minutes de trafic (1 225 VP, 92 FP, 45 FN — 15/09/2026, 17:00-17:12 UTC) | `queries/postgres_oltp.sql` §3, onglet "Performance ML" |
+| Performance **offline** du dernier entraînement | Varie à chaque réentraînement automatique : lire `ml/models/fraud_xgboost-v1.meta.json` (au 15/09 17:10 : précision 0,77, rappel 0,97, AUC 0,99 sur 21 744 transactions de test) | `make ml-train`, MLflow http://localhost:5001 |
 | Drift détecté | 0% (stack fraîchement seedée) | Onglet "Performance ML" → carte "Drift (part colonnes)" |
 | Disponibilité | 5/5 services core healthy (+ MLflow, ml-monitor) | `make status` |
 | Conformité RGPD | TTL 90j automatique | `db.transaction_logs.getIndexes()` → voir le `expireAfterSeconds: 7776000` |

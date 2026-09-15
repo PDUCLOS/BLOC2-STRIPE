@@ -69,8 +69,8 @@ CLUSTER BY (date_key, merchant_key)
 ```
 
 Justification : le pattern d'usage BI dominant est "revenu/fraude par jour
-et par marchand" (cf. requêtes `stripe_queries.sql §2.1 — Performance par
-région et trimestre`, et le dashboard `top_merchants()`). Clusterer sur
+et par marchand" (cf. [`queries/snowflake_olap.sql`](../queries/snowflake_olap.sql) §1 — revenu et
+fraude par région et trimestre, et le dashboard `top_merchants()`). Clusterer sur
 `(date_key, merchant_key)` fait que Snowflake élague (prune) les micro-partitions
 qui ne contiennent pas la plage de dates ou le marchand demandé, réduisant
 le volume de données scanné sans index explicite (Snowflake n'a pas
@@ -82,14 +82,15 @@ d'index B-tree classique — le clustering en tient lieu).
 
 ### 4.1 — Agrégation à la charge (au lieu de tables pré-agrégées)
 
-Le design actuel n'a **pas** de tables d'agrégats matérialisés côté
+Le schéma créé par `etl/snowflake_setup.py` n'a **pas** de tables d'agrégats matérialisés côté
 Snowflake (contrairement à Postgres qui a `mv_daily_revenue` et
 `mv_merchant_stats`, cf. `init/postgres/01_ddl.sql`). Choix assumé : à
 l'échelle démo (des milliers de lignes), le coût d'un `GROUP BY` à la volée
 sur `fact_transactions` est négligeable grâce au clustering (§3). À plus
 grande échelle (des milliards de lignes), la même logique que les vues
-matérialisées Postgres serait reproduite avec des **Dynamic Tables**
-Snowflake (agrégats rafraîchis automatiquement à intervalle défini).
+matérialisées Postgres est reproduite avec une **Dynamic Table**
+Snowflake : `dt_daily_revenue` (`TARGET_LAG = '1 hour'`), définie dans
+[`queries/snowflake_olap.sql`](../queries/snowflake_olap.sql) §5.
 
 ### 4.2 — Semi-additivité de `fraud_score`
 
@@ -97,8 +98,9 @@ Snowflake (agrégats rafraîchis automatiquement à intervalle défini).
 contrairement à `amount_eur`/`fee_amount` qui se somment sans ambiguïté. Une
 requête qui agrège `AVG(fraud_score)` doit toujours préciser sur quel grain
 (par jour ? par marchand ? les deux ?) car la moyenne des moyennes n'est pas
-la moyenne globale. `stripe_queries.sql` documente ce piège dans ses
-commentaires de section OLAP.
+la moyenne globale. [`queries/snowflake_olap.sql`](../queries/snowflake_olap.sql) calcule
+donc toujours `AVG(fraud_score)` au grain explicite du `GROUP BY`, jamais en
+moyennant des moyennes pré-agrégées.
 
 ### 4.3 — Idempotence du chargement (`MERGE INTO`)
 

@@ -6,7 +6,7 @@ Certification AIA RNCP41993 — Bloc 2
 > (Postgres, MongoDB, Redis, Kafka, MLflow, Evidently). Ce document décrit à
 > la fois la stratégie et l'implémentation réelle — chaque section renvoie
 > vers le code qui la réalise, avec les métriques obtenues en conditions
-> réelles (810 transactions générées, F1 fraude 0.93, ROC AUC 0.985).
+> réelles, mesurées sur la stack (voir §4 pour l'offline et §6 pour le servi).
 
 Intégration d'un modèle de machine learning au sein du système NoSQL
 (MongoDB + Redis comme feature stores) pour le scoring de fraude :
@@ -109,17 +109,29 @@ un sens (comparer des choses calculées de la même façon).
 | Fréquence de réentraînement | Manuelle (`make ml-train`) ou automatique (service `ml-monitor`, cf. §6) |
 | Tracking | Chaque run est tracé dans **MLflow** : hyperparamètres, métriques, modèle versionné dans le Model Registry (`fraud-detector`) |
 
-**Résultat mesuré** (810 transactions réelles générées en local, split
-temporel 648/162) :
+**Résultats mesurés** — la source de vérité est toujours
+`ml/models/fraud_xgboost-v1.meta.json`, réécrit à chaque entraînement
+(manuel ou automatique). Deux runs du 15/09/2026 :
 
-```
-              precision    recall  f1-score
-       legit       1.00      0.98      0.99
-       fraud       0.88      1.00      0.94
-    ROC AUC : 1.0 (sur ce run — dataset de démo, pattern de fraude
-    volontairement séparable ; à ne pas lire comme une performance
-    de production)
-```
+| Run | Déclencheur | Transactions train / test | Précision | Rappel | F1 | ROC AUC |
+|---|---|---|---|---|---|---|
+| 15:53 UTC | `make ml-train` | 81 626 / 20 407 | 0,95 | 0,97 | 0,96 | 0,995 |
+| 17:10 UTC | ml-monitor (dérive 0,43 > 0,3) | 86 976 / 21 744 | 0,77 | 0,97 | 0,86 | 0,990 |
+
+Sur la même période, la **précision servie** (décisions réelles du scorer
+comparées au label du générateur, `queries/postgres_oltp.sql` §3) est restée
+entre 0,93 et 0,99 par minute, **y compris juste après le réentraînement de
+17:10** (17:11 : 185 VP / 2 FP). La chute offline vient du jeu de test : la
+fenêtre la plus récente contient le redémarrage de la stack, avec un Redis
+vide et des rafales de trafic de rattrapage, que le split temporel place
+entièrement dans le test. Leçon retenue dans [MLOPS.md](MLOPS.md) : une
+métrique offline isolée ne suffit pas à juger un modèle réentraîné
+automatiquement, il faut la confronter à la performance servie.
+
+Le taux de fraude du jeu de test (~25 %) est supérieur aux 5 % injectés par
+le producteur, car les rafales de fraude (`[BURST]`) génèrent beaucoup de
+transactions pour un même client. Avec un vrai taux de 0,1 à 0,5 %, la
+précision baisserait mécaniquement à rappel égal.
 
 Sortie : [`ml/models/fraud_xgboost-v1.pkl`](../ml/models) (gitignored,
 généré par `make ml-train`) + `.meta.json` (métriques, feature names, run

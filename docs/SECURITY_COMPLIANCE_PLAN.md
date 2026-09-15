@@ -123,7 +123,7 @@ Repris et étendu de `PRESENTATION.md §6` :
 
 | Article RGPD | Mécanisme | Implémentation |
 |---|---|---|
-| Art. 17 — Droit à l'effacement | `anonymize_customer(p_customer_id UUID)` (PL/pgSQL) | Remplace email/nom/fingerprint, détache le `customer_id` des transactions existantes sans les supprimer (traçabilité comptable préservée) |
+| Art. 17 — Droit à l'effacement | `anonymize_customer(p_customer_id UUID)` (PL/pgSQL, [`init/postgres/02_rgpd.sql`](../init/postgres/02_rgpd.sql)) | Remplace email/nom/fingerprint, détache le `customer_id` des transactions existantes sans les supprimer (traçabilité comptable préservée) |
 | Art. 5(1)(e) — Limitation de conservation | TTL MongoDB | `transaction_logs` : 90 jours · `user_interactions` : 30 jours (cf. `init/mongo/01_init_collections.js`) |
 | Art. 4(5) — Pseudonymisation | Hash SHA-256 | `payment_methods.fingerprint`, jamais le PAN |
 | Art. 25 — Privacy by design | Séparation des rôles DB | Voir §3 |
@@ -207,3 +207,22 @@ hors périmètre de ce document.
 | Audit trail des accès DB | ❌ Non implémenté (§7.2) |
 | Endpoint RGPD Art. 15 (droit d'accès) | ❌ Non implémenté (§5) |
 | Isolation réseau (VPC, security groups) | ❌ Non applicable en local, à faire en prod (§6.2) |
+
+---
+
+## Traduction des contrôles dans l'Infrastructure as Code
+
+Les mesures de ce plan qui ne peuvent pas être démontrées dans le PoC local
+sont écrites dans [`terraform/`](../terraform/README.md) (validé en CI, non
+appliqué faute de compte AWS) :
+
+| Exigence | Contrôle | Où dans le code |
+|---|---|---|
+| PCI-DSS 1.3 — isoler les données de carte | Sous-réseaux data sans route Internet ; RDS, MSK, Redis et Atlas n'acceptent que le security group applicatif | `modules/network`, `modules/security` |
+| PCI-DSS 3.5 / RGPD art. 32 — chiffrement au repos | Une CMK KMS avec rotation annuelle pour RDS, MSK, Redis, S3, logs, ECR, secrets | `modules/security` (clé) et chaque module (`kms_key_arn`) |
+| PCI-DSS 4.2 — chiffrement en transit | `rds.force_ssl = 1`, MSK TLS obligatoire, Redis `transit_encryption_enabled`, S3 refuse le non-TLS | `modules/rds`, `modules/msk`, `modules/elasticache`, `modules/storage` |
+| PCI-DSS 8 — gestion des identifiants | Mot de passe maître RDS géré par RDS (rotation), Kafka en IAM (sans mot de passe), secrets injectés par ECS depuis Secrets Manager | `modules/rds`, `modules/msk`, `modules/compute` |
+| PCI-DSS 10 — journalisation | VPC Flow Logs 365 j, logs RDS/MSK/ECS dans CloudWatch chiffré | `modules/network`, `modules/rds`, `modules/msk`, `modules/compute` |
+| RGPD art. 44 — transferts hors UE | Région `eu-west-1`, Atlas en `EU_WEST_1` | `stack/variables.tf`, `envs/*/main.tf` |
+| Moindre privilège applicatif | Rôle de tâche ECS limité aux topics `stripe.*`, au bucket data lake et à la CMK | `modules/security` (`aws_iam_role_policy.ecs_task`) |
+
