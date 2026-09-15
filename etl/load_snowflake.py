@@ -63,6 +63,8 @@ def extract_from_pg(target_date: date):
                 -- Attributs marchand nécessaires à upsert_dimensions() (dim_merchant) —
                 -- extraits ici plutôt que re-requêtés côté Snowflake, même logique
                 -- de dénormalisation que pour le moyen de paiement ci-dessus.
+                m.name AS merchant_name,
+                m.email AS merchant_email,
                 m.country_code AS merchant_country_code,
                 m.tier AS merchant_tier,
                 m.status AS merchant_status
@@ -100,17 +102,20 @@ def upsert_dimensions(sf_cur, rows):
     # dim_merchant — même pattern INSERT ... WHERE NOT EXISTS que dim_customer
     # et dim_payment_method ci-dessous (pas de MERGE ... FROM VALUES : ce
     # dialecte VALUES attend des littéraux, pas des paramètres liés %s).
+    # Colonne Snowflake = "country" (cf. snowflake_setup.py dim_merchant DDL),
+    # pas "country_code" comme côté Postgres — les noms divergent entre les
+    # deux schémas, à ne pas confondre lors d'une extension de ce mapping.
     merchant_vals = list({
-        r["merchant_id"]: (r["merchant_id"], r.get("merchant_country_code"),
-                           r.get("merchant_tier"), r.get("merchant_status"))
+        r["merchant_id"]: (r["merchant_id"], r.get("merchant_name"), r.get("merchant_email"),
+                           r.get("merchant_country_code"), r.get("merchant_tier"), r.get("merchant_status"))
         for r in rows if r.get("merchant_id")
     }.values())
     if merchant_vals:
         sf_cur.executemany(
-            "INSERT INTO dim_merchant (merchant_id, country_code, tier, status) "
-            "SELECT %s, %s, %s, %s WHERE NOT EXISTS "
+            "INSERT INTO dim_merchant (merchant_id, name, email, country, tier, status) "
+            "SELECT %s, %s, %s, %s, %s, %s WHERE NOT EXISTS "
             "(SELECT 1 FROM dim_merchant WHERE merchant_id = %s)",
-            [(m[0], m[1], m[2], m[3], m[0]) for m in merchant_vals]
+            [(m[0], m[1], m[2], m[3], m[4], m[5], m[0]) for m in merchant_vals]
         )
 
     # dim_customer
@@ -196,7 +201,7 @@ def load_to_snowflake(rows, target_date: date):
                 r["currency"],
                 r["status"],
                 float(r["fraud_score"]) if r.get("fraud_score") is not None else None,
-                bool(r.get("fraud_score", 0) and float(r["fraud_score"]) >= 0.85),
+                bool(r.get("fraud_score") is not None and float(r["fraud_score"]) >= 0.85),
                 r.get("device_type"),
                 processing_ms,
                 r["created_at"],

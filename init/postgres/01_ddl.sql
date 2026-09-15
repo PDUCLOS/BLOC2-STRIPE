@@ -21,6 +21,11 @@ CREATE TABLE merchants (
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+-- Index partiel : transaction_producer.py tire un marchand actif au hasard à
+-- CHAQUE transaction générée (ORDER BY random() ... WHERE status = 'active')
+-- — sans index, full table scan à chaque appel. Partiel (pas sur toute la
+-- colonne) car seule la valeur 'active' est jamais filtrée par ce chemin.
+CREATE INDEX idx_merchants_status ON merchants(status) WHERE status = 'active';
 
 CREATE TABLE customers (
     customer_id   UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

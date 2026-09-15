@@ -70,7 +70,7 @@
     <mxCell id="m4c1" value="tier" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;" vertex="1" parent="m4">
       <mxGeometry x="50" width="160" height="28" as="geometry"><mxRectangle width="160" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
-    <mxCell id="m4c2" value="VARCHAR(20) DEF standard" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="m4">
+    <mxCell id="m4c2" value="VARCHAR(20)" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="m4">
       <mxGeometry x="210" width="130" height="28" as="geometry"><mxRectangle width="130" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
 
@@ -80,7 +80,7 @@
     <mxCell id="m5c1" value="status" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;" vertex="1" parent="m5">
       <mxGeometry x="50" width="160" height="28" as="geometry"><mxRectangle width="160" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
-    <mxCell id="m5c2" value="VARCHAR(20) DEF active" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="m5">
+    <mxCell id="m5c2" value="VARCHAR(20)" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="m5">
       <mxGeometry x="210" width="130" height="28" as="geometry"><mxRectangle width="130" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
 
@@ -224,7 +224,7 @@
     <mxCell id="pm5c1" value="fingerprint" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;" vertex="1" parent="pm5">
       <mxGeometry x="50" width="160" height="28" as="geometry"><mxRectangle width="160" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
-    <mxCell id="pm5c2" value="VARCHAR(64) PCI-DSS" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#c00000;" vertex="1" parent="pm5">
+    <mxCell id="pm5c2" value="VARCHAR(64)" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#c00000;" vertex="1" parent="pm5">
       <mxGeometry x="210" width="130" height="28" as="geometry"><mxRectangle width="130" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
     <mxCell id="pm6" value="" style="shape=tableRow;horizontal=0;startSize=0;swimlaneHead=0;swimlaneBody=0;fillColor=none;collapsible=0;dropTarget=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;top=0;left=0;right=0;bottom=0;" vertex="1" parent="pm0">
@@ -300,7 +300,7 @@
     <mxCell id="tx4c1" value="pm_id" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;" vertex="1" parent="tx4">
       <mxGeometry x="55" width="185" height="28" as="geometry"><mxRectangle width="185" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
-    <mxCell id="tx4c2" value="UUID → payment_methods" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="tx4">
+    <mxCell id="tx4c2" value="UUID → pm" style="shape=partialRectangle;connectable=0;fillColor=none;top=0;left=0;bottom=0;right=0;overflow=hidden;fontStyle=2;fontColor=#888888;" vertex="1" parent="tx4">
       <mxGeometry x="240" width="140" height="28" as="geometry"><mxRectangle width="140" height="28" as="alternateBounds"/></mxGeometry>
     </mxCell>
 
@@ -521,8 +521,19 @@
     </mxCell>
 
     <!-- ═══ RELATIONS ═══ -->
-    <mxCell id="rel1" value="1" style="edgeStyle=entityRelationEdgeStyle;endArrow=ERmanyToOne;startArrow=ERmandOne;strokeColor=#82b366;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="m0r0" target="tx2" parent="1">
-      <mxGeometry relative="1" as="geometry"/>
+    <!-- merchants→transactions passe loin (customers + payment_methods sont entre
+         les deux) : entityRelationEdgeStyle ignore les waypoints manuels (testé,
+         confirmé — le tracé reste diagonal à travers customers quoi qu'on mette
+         dans <Array as="points">). Bascule sur orthogonalEdgeStyle, qui les
+         respecte, en gardant les mêmes flèches ER (juste le routeur qui change) :
+         détour explicite par le haut du schéma (y=60, tables commencent à y=90). -->
+    <mxCell id="rel1" value="1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=ERmanyToOne;startArrow=ERmandOne;strokeColor=#82b366;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="m0r0" target="tx2" parent="1">
+      <mxGeometry relative="1" as="geometry">
+        <Array as="points">
+          <mxPoint x="410" y="60" />
+          <mxPoint x="850" y="60" />
+        </Array>
+      </mxGeometry>
     </mxCell>
     <mxCell id="rel2" value="1" style="edgeStyle=entityRelationEdgeStyle;endArrow=ERmanyToOne;startArrow=ERmandOne;strokeColor=#82b366;strokeWidth=2;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" edge="1" source="cu1" target="tx3" parent="1">
       <mxGeometry relative="1" as="geometry"/>

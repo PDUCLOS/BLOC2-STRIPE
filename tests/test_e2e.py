@@ -30,7 +30,19 @@ PG_CONFIG = dict(
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.environ.get("REDIS_PORT", 6379))
 REDIS_PASSWORD = os.environ.get("REDIS_PASSWORD") or None
-MONGO_URI  = os.environ.get("MONGO_URI", "mongodb://stripe_app:stripe_pass@localhost:27017/stripe_nosql?authSource=admin")
+# Construit depuis MONGO_APP_USER/MONGO_APP_PASSWORD (mêmes noms que
+# init/mongo/02_app_user.js et scripts/init_env.sh) plutôt qu'un URI en dur :
+# make init-env génère un MONGO_APP_PASSWORD aléatoire par installation, donc
+# un mot de passe codé en dur ici ne correspondrait jamais à la vraie base.
+MONGO_HOST = os.environ.get("MONGO_HOST", "localhost")
+MONGO_PORT = int(os.environ.get("MONGO_PORT", 27017))
+MONGO_APP_USER = os.environ.get("MONGO_APP_USER", "stripe_app")
+MONGO_APP_PASSWORD = os.environ.get("MONGO_APP_PASSWORD", "stripe_app_dev")
+MONGO_DB = os.environ.get("MONGO_DB", "stripe_nosql")
+MONGO_URI = os.environ.get(
+    "MONGO_URI",
+    f"mongodb://{MONGO_APP_USER}:{MONGO_APP_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}?authSource=admin",
+)
 
 FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))
 REVIEW_THRESHOLD = float(os.environ.get("REVIEW_THRESHOLD", 0.60))
@@ -185,7 +197,13 @@ def test_pg_debezium_publication():
 
 
 def test_pg_materialized_views():
-    """Vérifie la présence des vues matérialisées pour les statistiques."""
+    """Vérifie la présence ET le contenu des vues matérialisées.
+
+    Une vue peut exister (CREATE MATERIALIZED VIEW a tourné une fois) sans
+    jamais avoir été rafraîchie depuis — vérifier seulement pg_matviews donne
+    un faux sentiment de couverture si etl/refresh_views.py n'a jamais
+    réellement tourné. On vérifie donc aussi qu'elles contiennent des lignes.
+    """
     conn = psycopg2.connect(**PG_CONFIG)
     with conn.cursor() as cur:
         cur.execute("""
@@ -193,9 +211,16 @@ def test_pg_materialized_views():
             WHERE matviewname IN ('mv_daily_revenue','mv_merchant_stats')
         """)
         views = {r[0] for r in cur.fetchall()}
+        assert "mv_daily_revenue" in views, "mv_daily_revenue manquante"
+        assert "mv_merchant_stats" in views, "mv_merchant_stats manquante"
+
+        cur.execute("SELECT COUNT(*) FROM mv_daily_revenue")
+        n_revenue = cur.fetchone()[0]
+        cur.execute("SELECT COUNT(*) FROM mv_merchant_stats")
+        n_merchant = cur.fetchone()[0]
     conn.close()
-    assert "mv_daily_revenue" in views, "mv_daily_revenue manquante"
-    assert "mv_merchant_stats" in views, "mv_merchant_stats manquante"
+    assert n_revenue > 0, "mv_daily_revenue existe mais est vide — jamais rafraîchie ? (make refresh-views)"
+    assert n_merchant > 0, "mv_merchant_stats existe mais est vide — jamais rafraîchie ? (make refresh-views)"
 
 
 def test_pg_amount_bigint():

@@ -29,13 +29,9 @@ import psycopg2
 from psycopg2.extras import execute_values
 
 # Load .env (via shared helper à la racine du projet)
-# Le ternaire ci-dessous est un no-op volontaire : que ce script soit lancé
-# depuis producers/ ou importé depuis tests/, la racine visée est toujours
-# grand-parent du fichier — gardé explicite pour rester lisible si la logique
-# doit un jour diverger entre les deux cas d'appel.
 import sys
 from pathlib import Path as _P
-sys.path.insert(0, str(_P(__file__).resolve().parent.parent if _P(__file__).parent.name != "tests" else _P(__file__).resolve().parent.parent))
+sys.path.insert(0, str(_P(__file__).resolve().parent.parent))
 import _env  # noqa: F401 — l'import seul déclenche le chargement du .env
 KAFKA_BROKERS = os.environ.get("KAFKA_BROKERS", "localhost:9092")
 REDIS_HOST = os.environ.get("REDIS_HOST", "localhost")

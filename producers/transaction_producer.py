@@ -27,7 +27,7 @@ import sys
 from pathlib import Path as _P
 # Ajoute la racine du projet au path Python pour que le helper _env soit importable
 # quand le script est lancé directement depuis le dossier producers/.
-sys.path.insert(0, str(_P(__file__).resolve().parent.parent if _P(__file__).parent.name != "tests" else _P(__file__).resolve().parent.parent))
+sys.path.insert(0, str(_P(__file__).resolve().parent.parent))
 import _env  # noqa: F401
 # Paramètres de connexion PostgreSQL lus depuis l'environnement préparé par _env.
 PG_CONFIG = {
