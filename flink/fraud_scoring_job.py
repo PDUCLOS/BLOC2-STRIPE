@@ -67,6 +67,14 @@ class FraudScoringFunction(MapFunction):
             if not after:
                 return json.dumps({"_skip": True, "raw": raw})
 
+            # Ignore l'écho de notre propre write-back : l'UPDATE fraud_score
+            # plus bas est capté par Debezium et republié sur ce MÊME topic,
+            # donc sans ce garde-fou chaque transaction serait rescorée
+            # (et sa vélocité Redis réincrémentée) indéfiniment — même bug
+            # que producers/flink_like_job.py, corrigé ici en miroir.
+            if after.get("fraud_score") is not None:
+                return json.dumps({"_skip": True, "raw": raw})
+
             txn_id      = str(after.get("txn_id", ""))
             customer_id = str(after.get("customer_id", ""))
             amount      = int(after.get("amount", 0))

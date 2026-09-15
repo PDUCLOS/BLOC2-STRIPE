@@ -26,3 +26,9 @@ setuptools<81
 
 # Détection de drift / suivi de performance en continu (ml/monitor.py)
 evidently==0.4.25
+
+# Notebook d'audit données/ML (notebooks/audit_data_ml.ipynb) — cf. make notebook
+jupyter==1.0.0
+ipykernel==6.29.4
+nbformat==5.10.4
+nbconvert==7.16.4

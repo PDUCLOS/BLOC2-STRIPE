@@ -1,8 +1,15 @@
 """Inférence du modèle de fraude entraîné (ml/train_fraud_model.py).
 
-Chargement paresseux et mis en cache : le modèle n'est lu depuis disque
-qu'une fois par process, pas à chaque transaction scorée — même logique que
-les connexions Redis/Postgres réutilisées dans producers/flink_like_job.py.
+Chargement paresseux et mis en cache : le modèle n'est relu depuis disque que
+lorsque le fichier a changé (mtime), pas à chaque transaction scorée — même
+logique que les connexions Redis/Postgres réutilisées dans
+producers/flink_like_job.py. Sans ce check de mtime, un process scorer
+longue durée ne verrait JAMAIS les modèles réentraînés par ml/monitor.py
+(retrain automatique sur drift/perf dégradés) tant qu'il n'est pas relancé
+manuellement — c'est ce qui a fait tourner l'auto-retrain dans le vide en
+prod le 2026-09-15 (précision servie bloquée à ~25% malgré 2 retrains
+consécutifs, cf. ml_monitoring : le process live avait bien le nouveau
+fichier .pkl sur disque mais continuait à servir l'ancien modèle en mémoire).
 
 Si le fichier modèle est absent (pas encore entraîné), score() renvoie None
 plutôt que de lever une exception : l'appelant (score_transaction() dans
@@ -17,26 +24,32 @@ MODEL_VERSION = "xgboost-v1"
 MODEL_PATH = Path(__file__).resolve().parent / "models" / f"fraud_{MODEL_VERSION}.pkl"
 
 _model_cache = None
-_model_load_attempted = False
+_model_cache_mtime = None
 
 
 def load_model():
-    """Charge le modèle depuis disque (une seule fois, mis en cache en mémoire).
+    """Charge le modèle depuis disque, en le rechargeant si le fichier a été
+    réécrit depuis le dernier chargement (mtime plus récent que celui vu en
+    cache) — c'est ce qui permet à un auto-retrain de prendre effet sur un
+    process scorer déjà démarré, sans redémarrage manuel.
 
     Returns:
         xgb.XGBClassifier | None: Le modèle chargé, ou None si le fichier
         n'existe pas encore (le modèle n'a pas été entraîné).
     """
-    global _model_cache, _model_load_attempted
-    if _model_load_attempted:
-        return _model_cache
-    _model_load_attempted = True
+    global _model_cache, _model_cache_mtime
 
     if not MODEL_PATH.exists():
+        _model_cache, _model_cache_mtime = None, None
         return None
+
+    current_mtime = MODEL_PATH.stat().st_mtime
+    if _model_cache is not None and current_mtime == _model_cache_mtime:
+        return _model_cache
 
     import joblib
     _model_cache = joblib.load(MODEL_PATH)
+    _model_cache_mtime = current_mtime
     return _model_cache
 
 

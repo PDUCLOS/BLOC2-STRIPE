@@ -144,10 +144,14 @@ if SCORING_ENGINE == "ml":
 
 ### 5.2 — Chargement du modèle
 
-[`ml/scoring.py`](../ml/scoring.py) : `load_model()` charge le `.pkl` une
-seule fois par process (mis en cache en mémoire), comme la connexion Redis
-existante. Renvoie `None` sans exception si le fichier n'existe pas encore —
-c'est ce `None` que le scorer interprète comme "utilise les règles".
+[`ml/scoring.py`](../ml/scoring.py) : `load_model()` charge le `.pkl` et le
+garde en cache mémoire (comme la connexion Redis existante), mais **revérifie
+le `mtime` du fichier à chaque appel** et recharge si un réentraînement l'a
+réécrit depuis — sans ce check, un scorer longue durée ne voit jamais les
+retrains automatiques de `ml/monitor.py` (cf. §6, incident du 2026-09-15).
+Le coût d'un `stat()` par transaction est négligeable face au débit de démo
+(quelques txn/s). Renvoie `None` sans exception si le fichier n'existe pas
+encore — c'est ce `None` que le scorer interprète comme "utilise les règles".
 
 ### 5.3 — Rollout : ce qui est fait, ce qui reste
 
@@ -183,15 +187,56 @@ statut du dernier cycle, l'évolution drift/recall dans le temps (avec
 marqueurs sur les réentraînements déclenchés), la distribution des scores
 par `model_version`, et un lien direct vers l'UI MLflow.
 
-**Limite assumée** : le scorer déjà lancé garde le modèle en cache mémoire
-(`ml/scoring.py`) — un réentraînement écrase le `.pkl` sur disque, mais
-seul un redémarrage du process scorer charge la nouvelle version. Pas de
-hot-reload (watcher de fichier) pour éviter d'ajouter une I/O disque sur le
-chemin d'inférence chaud à chaque transaction.
+**Hot-reload** : `ml/scoring.py::load_model()` revérifie le `mtime` du `.pkl`
+à chaque scoring (cf. §5.2) — un réentraînement automatique prend donc effet
+sur le scorer déjà lancé, sans redémarrage manuel.
+
+### 6.1 — Incident documenté : auto-retrain dans le vide (2026-09-15)
+
+Avant le fix ci-dessus, `ml/scoring.py` chargeait le modèle **une seule
+fois** par process. Conséquence observée en conditions réelles : `ml-monitor`
+a détecté une alerte de précision et déclenché **deux réentraînements
+automatiques** consécutifs (13:56 UTC, 14:02 UTC) — chacun a bien produit un
+nouveau `.pkl` et une nouvelle version MLflow, mais le scorer déjà lancé
+(actif depuis 11:24 UTC) ne les a jamais chargés. La précision servie est
+restée bloquée à ~25% malgré les retrains, jusqu'au fix du hot-reload.
+
+Root cause distincte, découverte dans la foulée : la précision catastrophique
+elle-même (jusqu'à 29% avant tout retrain) venait d'un bug de double-scoring
+dans `producers/flink_like_job.py`, documenté en §7.1. Les deux bugs se
+superposaient : la chaîne de service dégradait la précision réelle, et
+l'absence de hot-reload empêchait le monitoring de corriger la situation
+même en réentraînant. Le notebook [`notebooks/audit_data_ml.ipynb`](../notebooks/audit_data_ml.ipynb)
+(§4.3 et §7) documente l'investigation complète avec les chiffres avant/après.
 
 ---
 
 ## 7. Boucle de rétroaction (partiellement implémentée)
+
+### 7.1 — Incident documenté : double-scoring via écho CDC (2026-09-15)
+
+`producers/flink_like_job.py` fait un write-back du `fraud_score` dans
+`transactions` après scoring pour que le dashboard SQL soit à jour sans
+JOIN Kafka. Or Debezium capte cet `UPDATE` et le republie sur le **même
+topic** `stripe.public.transactions` que le consumer écoute — chaque
+transaction produisait donc deux événements CDC (l'`INSERT` original, puis
+l'écho de son propre `UPDATE`), et le scorer les traitait **tous les
+deux** : vélocité Redis incrémentée deux fois, transaction rescorée et
+ré-émise vers Mongo deux fois. La vélocité systématiquement ~2x sa valeur
+réelle a désynchronisé les features servies de la distribution vue à
+l'entraînement (le modèle entraîné sur `transactions` en SQL pur n'a
+jamais été affecté, seule la chaîne de service l'était) — précision servie
+mesurée à **29%** avant correctif (recall resté à 96%, cohérent avec un
+biais qui pousse le score vers le haut sans dégrader la détection des
+vrais positifs).
+
+**Correctif** : garde-fou `if txn.get("fraud_score") is not None: continue`
+juste après le parsing du message, avant tout calcul de features — ignore
+l'écho de son propre write-back. Même correctif appliqué en miroir dans
+`flink/fraud_scoring_job.py` (référence PyFlink production, non actif dans
+cette démo mais porteur du même bug). Précision servie mesurée après
+correctif : **97%** (1858 transactions). Détail complet dans
+[`notebooks/audit_data_ml.ipynb`](../notebooks/audit_data_ml.ipynb) §2 et §4.3.
 
 ```
 Décision modèle (block/review/allow)

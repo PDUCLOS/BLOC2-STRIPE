@@ -244,9 +244,9 @@ def main():
     })
 
     # Connexion Postgres (pour write-back du fraud_score)
-    # Note: c'est le même Debezium qui capte cet UPDATE et le re-pousse dans Kafka,
-    # créant un cycle maîtrisé via le consumer group "flink-fraud-scorer" qui ignore
-    # ses propres messages (auto.offset.reset=earliest au 1er démarrage seulement).
+    # Note: Debezium capte cet UPDATE et le republie sur stripe.public.transactions
+    # — le garde-fou `if txn.get("fraud_score") is not None: continue` plus haut
+    # dans la boucle est ce qui empêche ce cycle de re-scorer la transaction.
     def connect_pg():
         """Ouvre une connexion Postgres pour le write-back, ou None si indisponible.
 
@@ -306,6 +306,20 @@ def main():
             producer.poll(0)
             print(f"  [DLQ] parse error at offset {msg.offset()}: {e}", file=sys.stderr)
             count += 1
+            continue
+
+        # Ignore l'écho de notre propre write-back : l'UPDATE fraud_score
+        # plus bas est capté par Debezium et republié sur ce MÊME topic
+        # (stripe.public.transactions), donc CHAQUE transaction produit 2
+        # événements CDC — l'INSERT original (fraud_score=null) et cet
+        # UPDATE (fraud_score déjà renseigné). Sans ce garde-fou, le 2e
+        # passage réincrémente la vélocité Redis et rescore/ré-émet vers
+        # Mongo pour une transaction déjà traitée — vélocité et alertes
+        # doublées en continu, ce qui désynchronise les features servies de
+        # la distribution vue à l'entraînement (train/serve skew) et a
+        # fait chuter la précision réelle à ~29% en prod (cf. investigation
+        # du 2026-09-15, ml_monitoring status=alert répété malgré retrain).
+        if txn.get("fraud_score") is not None:
             continue
 
         # Scoring : si KO (txn malformé, pas de customer_id, etc), DLQ aussi

@@ -41,7 +41,11 @@ MONGO_APP_PASSWORD = os.environ.get("MONGO_APP_PASSWORD", "stripe_app_dev")
 MONGO_DB = os.environ.get("MONGO_DB", "stripe_nosql")
 MONGO_URI = os.environ.get(
     "MONGO_URI",
-    f"mongodb://{MONGO_APP_USER}:{MONGO_APP_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}?authSource=admin",
+    # authSource = MONGO_DB (pas "admin") : init/mongo/02_app_user.js crée
+    # stripe_app via db.getSiblingDB(MONGO_DB).createUser(...) — l'utilisateur
+    # est scopé à cette base, pas à admin (contrairement à MONGO_USER, le
+    # compte root créé par MONGO_INITDB_ROOT_USERNAME).
+    f"mongodb://{MONGO_APP_USER}:{MONGO_APP_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}?authSource={MONGO_DB}",
 )
 
 FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))

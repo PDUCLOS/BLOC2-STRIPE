@@ -136,6 +136,21 @@ dashboard:
 		--browser.gatherUsageStats false
 
 # ─────────────────────────────────────────────────────────
+# Notebook d'audit données/ML
+# ─────────────────────────────────────────────────────────
+.PHONY: notebook notebook-check
+notebook:
+	@./.venv/bin/jupyter lab notebooks/audit_data_ml.ipynb
+
+# Relance le notebook de bout en bout et échoue (exit != 0) si un des
+# `assert` de contrôle échoue — utilisable en CI ou juste avant une démo.
+notebook-check:
+	@./.venv/bin/jupyter nbconvert --to notebook --execute --inplace \
+		--ExecutePreprocessor.timeout=180 \
+		--ExecutePreprocessor.kernel_name=stripe-polyglot \
+		notebooks/audit_data_ml.ipynb
+
+# ─────────────────────────────────────────────────────────
 # Snowflake
 # ─────────────────────────────────────────────────────────
 .PHONY: snowflake-setup
