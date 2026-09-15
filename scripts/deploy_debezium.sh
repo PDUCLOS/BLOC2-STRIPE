@@ -31,7 +31,14 @@ done
 EXISTING=$(curl -fsS "$CONNECT_URL/connectors" 2>/dev/null | grep -o "$CONNECTOR_NAME" || true)
 if [ -n "$EXISTING" ]; then
   echo "[WARN] Connecteur $CONNECTOR_NAME existe déjà, status :"
-  curl -fsS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status" | python3 -m json.tool
+  # Juste après la création, Kafka Connect peut encore répondre 404 le temps
+  # d'enregistrer le connecteur (rebalance du groupe) : on réessaie jusqu'à 30 s.
+  for _ in $(seq 1 15); do
+    if STATUS=$(curl -fsS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status" 2>/dev/null); then break; fi
+    STATUS=""; sleep 2
+  done
+  [ -n "$STATUS" ] || { echo "[ERROR] statut du connecteur indisponible après 30 s"; exit 1; }
+  echo "$STATUS" | python3 -m json.tool
   exit 0
 fi
 
@@ -69,4 +76,11 @@ fi
 echo ""
 echo "Status du connecteur :"
 sleep 3
-curl -fsS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status" | python3 -m json.tool
+# Juste après la création, Kafka Connect peut encore répondre 404 le temps
+# d'enregistrer le connecteur (rebalance du groupe) : on réessaie jusqu'à 30 s.
+for _ in $(seq 1 15); do
+  if STATUS=$(curl -fsS "$CONNECT_URL/connectors/$CONNECTOR_NAME/status" 2>/dev/null); then break; fi
+  STATUS=""; sleep 2
+done
+[ -n "$STATUS" ] || { echo "[ERROR] statut du connecteur indisponible après 30 s"; exit 1; }
+echo "$STATUS" | python3 -m json.tool
