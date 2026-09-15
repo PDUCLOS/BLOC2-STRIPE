@@ -31,6 +31,9 @@ create_topic() {
 }
 
 # Topics applicatifs
+# 12 partitions sur payments.events : c'est le flux à plus fort débit (toutes les
+# transactions), dimensionné pour du parallélisme consommateur. fraud.alerts et
+# dead-letter sont des sous-ensembles bien plus faibles en volume → 3 suffit.
 create_topic "stripe.payments.events"      12  2592000000  # 30 jours
 create_topic "stripe.fraud.alerts"         3  2592000000  # 30 jours
 # DLQ gardé sans expiration pour ne jamais perdre les événements en erreur.

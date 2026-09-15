@@ -50,6 +50,10 @@ class FraudScoringFunction(MapFunction):
         self.redis_client = None
 
     def open(self, runtime_context):
+        # open() s'exécute une fois par instance de tâche sur le TaskManager
+        # (pas par événement) : c'est là, et pas dans __init__, qu'on peut
+        # créer la connexion Redis car __init__ tourne côté client avant
+        # sérialisation de la fonction vers les workers Flink.
         import redis
         self.redis_client = redis.Redis(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True
@@ -114,6 +118,9 @@ class FraudScoringFunction(MapFunction):
                 decision = "allow"
 
             # Mise à jour PostgreSQL (write-back)
+            # Connexion ouverte/fermée à chaque événement plutôt que réutilisée :
+            # simplicité de référence pour la démo (pas de pool psycopg2 partagé
+            # entre workers Flink). À remplacer par un pool en prod à fort débit.
             try:
                 import psycopg2
                 conn = psycopg2.connect(

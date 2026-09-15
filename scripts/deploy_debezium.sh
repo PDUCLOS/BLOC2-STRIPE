@@ -10,6 +10,9 @@ source "$PROJECT_ROOT/.env"
 set +a
 
 CONNECT_URL="${KAFKA_CONNECT_URL:-http://localhost:8083}"
+# Suffixe -v2 : change le nom si la config du connecteur évolue de façon
+# incompatible (ex. slot.name, publication), pour éviter de réutiliser un
+# connecteur existant avec un replication slot Postgres orphelin de l'ancienne config.
 CONNECTOR_NAME="stripe-postgres-cdc-v2"
 
 echo "Déploiement du connecteur Debezium sur $CONNECT_URL..."

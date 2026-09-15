@@ -196,6 +196,9 @@ def main():
             while _running:
                 loop_start = time.time()
 
+                # Un "burst" en cours prend la main sur la génération normale : on rejoue
+                # le même triplet marchand/client/moyen de paiement pour simuler une rafale
+                # d'essais de carte volée sur un seul compte (au lieu d'une fraude isolée).
                 if burst_remaining > 0:
                     is_fraud = True
                     txn = build_transaction(is_fraud)

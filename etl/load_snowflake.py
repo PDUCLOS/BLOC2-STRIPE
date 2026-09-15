@@ -53,22 +53,22 @@ def extract_from_pg(target_date: date):
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
             SELECT
-                t.txn_id,
-                t.merchant_id,
-                t.customer_id,
-                t.pm_id,
-                t.amount,
-                t.currency,
-                t.status,
-                t.fraud_score,
-                t.device_type,
-                t.ip_country,
-                t.created_at,
+                t.txn_id, t.merchant_id, t.customer_id, t.pm_id,
+                t.amount, t.currency, t.status, t.fraud_score,
+                t.device_type, t.ip_country, t.created_at,
+                -- Dénormalise le type/marque du moyen de paiement directement dans
+                -- l'extraction : évite un JOIN côté Snowflake au moment du reporting.
                 pm.type AS pm_type,
                 pm.brand AS pm_brand
             FROM transactions t
+            -- LEFT JOIN (pas INNER) : pm_id peut être NULL (moyen de paiement supprimé
+            -- ou transaction sans pm associé) sans que la transaction disparaisse de l'export.
             LEFT JOIN payment_methods pm ON pm.pm_id = t.pm_id
+            -- Fenêtre = une journée calendaire complète (le job est pensé pour tourner
+            -- une fois par jour, cf. Airflow 02:00 UTC dans PRESENTATION.md).
             WHERE DATE(t.created_at) = %s
+              -- Seules les transactions abouties entrent dans le DWH financier —
+              -- les échecs/pending n'ont pas leur place dans fact_transactions.
               AND t.status = 'succeeded'
             ORDER BY t.created_at
         """, (target_date,))
@@ -164,7 +164,9 @@ def load_to_snowflake(rows, target_date: date):
             # fee = 1.4% Stripe standard (démo)
             amount_eur = round(float(r["amount"]) / 100, 2)
             fee_amount = round(amount_eur * 0.014, 4)
-            # processing_ms simulé : 20-45ms (démo)
+            # processing_ms simulé : 20-45ms (démo, cette latence n'est pas mesurée
+            # réellement dans le pipeline). Seed = txn_id pour que la valeur soit
+            # stable si le MERGE est rejoué (idempotence du chargement).
             import random; random.seed(str(r["txn_id"]))
             processing_ms = round(20 + random.random() * 25, 1)
 

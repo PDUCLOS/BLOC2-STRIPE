@@ -98,6 +98,10 @@ def main():
         )
     """, "Table dim_date")
 
+    # valid_from/is_current préparent une dimension à évolution lente (SCD type 2) :
+    # pas exploités par le chargement actuel (load_snowflake.py fait de l'INSERT-only),
+    # mais présents pour éviter une migration de schéma le jour où l'historisation
+    # des changements merchant/customer devient nécessaire.
     run(cur, """
         CREATE TABLE IF NOT EXISTS dim_merchant (
             merchant_key  NUMBER AUTOINCREMENT PRIMARY KEY,
@@ -182,6 +186,8 @@ def main():
                 MONTH(d)                                       AS month,
                 WEEKOFYEAR(d)                                  AS week,
                 DAYOFWEEK(d)                                   AS day_of_week,
+                -- DAYOFWEEK Snowflake : 0=dimanche, 6=samedi (convention SQL standard,
+                -- différente d'ISO 8601 où la semaine commence lundi).
                 DAYOFWEEK(d) IN (0, 6)                         AS is_weekend
             FROM (
                 SELECT DATEADD('day', SEQ4(), '2020-01-01')    AS d

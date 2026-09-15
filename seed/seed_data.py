@@ -93,6 +93,10 @@ def insert_customers(cur):
             if email not in used_emails:
                 used_emails.add(email)
                 break
+        # Distribution volontairement inégale : majorité de clients "standard",
+        # une minorité "new"/"inactive" — ce sont ces deux segments que
+        # pick_customer_pm() cible pour générer les transactions frauduleuses,
+        # donc leur proportion ici calibre indirectement le volume de fraude simulable.
         rows.append((
             email,
             fake.name(),

@@ -73,6 +73,8 @@ def main():
         sys.exit(1)
 
     # Producer Kafka pour DLQ
+    # Import local (pas en tête de fichier) pour garder KafkaProducer visible
+    # uniquement là où il sert, vu que le reste du script ne consomme que KafkaConsumer.
     from kafka import KafkaProducer
     dlq_producer = KafkaProducer(
         bootstrap_servers=KAFKA_BROKERS.split(","),

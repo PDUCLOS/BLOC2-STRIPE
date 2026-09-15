@@ -124,29 +124,42 @@ CREATE PUBLICATION stripe_publication FOR TABLE
 -- Vues matérialisées (analytics temps réel)
 -- =====================================================================
 
+-- Revenu quotidien par devise : une ligne par (jour, currency). Ne compte que
+-- les transactions 'succeeded' — un échec ne génère pas de revenu réel.
+-- WITH NO DATA : la vue est créée vide, à peupler explicitement avec
+-- REFRESH MATERIALIZED VIEW (sinon l'init SQL scanne une table encore vide au 1er boot).
 CREATE MATERIALIZED VIEW mv_daily_revenue AS
 SELECT
     DATE_TRUNC('day', created_at) AS day,
     currency,
     COUNT(*) AS txn_count,
     SUM(amount) AS gross_amount_cents,
+    -- Moyenne sur TOUTES les lignes du groupe (succeeded uniquement), y compris
+    -- celles pas encore scorées (fraud_score NULL est ignoré par AVG() nativement).
     AVG(fraud_score) AS avg_fraud_score
 FROM transactions
 WHERE status = 'succeeded'
 GROUP BY DATE_TRUNC('day', created_at), currency
 WITH NO DATA;
 
+-- Index UNIQUE requis pour permettre un REFRESH CONCURRENTLY (rafraîchissement
+-- sans verrouiller les lecteurs pendant le recalcul).
 CREATE UNIQUE INDEX idx_mv_daily_revenue ON mv_daily_revenue(day, currency);
 
+-- Statistiques agrégées par marchand : txn_count + GMV + score fraude moyen.
 CREATE MATERIALIZED VIEW mv_merchant_stats AS
 SELECT
     m.merchant_id,
     m.name,
     m.tier,
+    -- Compte toutes les transactions du marchand (succeeded ou non).
     COUNT(t.txn_id) AS txn_count,
+    -- GMV (Gross Merchandise Value) : uniquement les paiements réussis.
     COALESCE(SUM(t.amount) FILTER (WHERE t.status = 'succeeded'), 0) AS gmv_cents,
     COALESCE(AVG(t.fraud_score), 0) AS avg_fraud_score
 FROM merchants m
+-- LEFT JOIN (pas INNER) : un marchand sans transaction doit quand même
+-- apparaître dans la vue, avec txn_count=0 et gmv_cents=0 via COALESCE.
 LEFT JOIN transactions t ON t.merchant_id = m.merchant_id
 GROUP BY m.merchant_id, m.name, m.tier
 WITH NO DATA;

@@ -23,9 +23,14 @@ from psycopg2.extras import RealDictCursor
 from pymongo import MongoClient
 
 # ── Chargement .env ────────────────────────────────────────────────────────────
+# Le dashboard tourne depuis dashboard/, donc on remonte à la racine du projet
+# pour que _env trouve le .env quel que soit le répertoire d'appel de streamlit.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-import _env  # noqa: F401
+import _env  # noqa: F401 — l'import seul déclenche le chargement du .env
 
+# Config des 3 datastores lues depuis l'environnement, avec des valeurs par défaut
+# alignées sur docker-compose.yml pour que `streamlit run` marche aussi hors Docker
+# (connexion directe aux ports exposés sur localhost).
 PG_CONFIG = dict(
     host=os.environ.get("PG_HOST", "localhost"),
     port=int(os.environ.get("PG_PORT", 5432)),
@@ -48,6 +53,9 @@ MONGO_CONFIG = dict(
     db=os.environ.get("MONGO_DB", "stripe_nosql"),
 )
 FRAUD_THRESHOLD = float(os.environ.get("FRAUD_SCORE_THRESHOLD", 0.85))
+# Doit rester identique au seuil utilisé côté scorer (flink/fraud_scoring_job.py,
+# producers/flink_like_job.py) : sinon le dashboard et le moteur de décision
+# ne comptent pas les mêmes transactions comme frauduleuses.
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -135,12 +143,22 @@ def kpis_from_pg():
     Returns:
         dict: Dictionnaire contenant le total des transactions, le revenu, les fraudes, etc.
     """
+    # Une seule requête sur toute la table transactions, avec des agrégats FILTER
+    # (Postgres) pour calculer plusieurs compteurs conditionnels en un seul scan
+    # plutôt que 7 requêtes séparées — plus économe, un aller-retour réseau unique.
     df = pg_query("""
         SELECT
+            -- Nombre total de lignes, toutes transactions confondues (dénominateur du taux de fraude).
             COUNT(*)                                              AS total_txns,
+            -- Transactions créées dans la dernière heure glissante (indicateur d'activité live).
             COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1h') AS txns_1h,
+            -- Somme des montants encaissés (status='succeeded' uniquement, pas les échecs/refus).
+            -- /100.0 car amount est stocké en centimes (BIGINT) ; COALESCE évite un NULL si aucune ligne.
             COALESCE(SUM(amount) FILTER (WHERE status='succeeded') / 100.0, 0) AS revenue_eur,
+            -- Nombre de transactions dont le score dépasse le seuil de blocage fraude.
             COUNT(*) FILTER (WHERE fraud_score >= %s)            AS fraud_count,
+            -- Score de fraude moyen, calculé uniquement sur les lignes déjà scorées
+            -- (le scoring est asynchrone : une transaction fraîche peut avoir fraud_score IS NULL).
             COALESCE(AVG(fraud_score) FILTER (WHERE fraud_score IS NOT NULL), 0) AS avg_fraud_score,
             COUNT(*) FILTER (WHERE status = 'succeeded')         AS succeeded,
             COUNT(*) FILTER (WHERE status = 'failed')            AS failed
@@ -173,12 +191,20 @@ def txn_over_time():
     # sans surcharger le rendu Plotly pendant la démo.
     return pg_query("""
         SELECT
+            -- Regroupe les horodatages à la minute près pour produire une série
+            -- temporelle lisible (sinon une ligne par transaction, illisible en graphe).
             DATE_TRUNC('minute', created_at) AS minute,
             COUNT(*) AS count,
+            -- Sous-compte des transactions frauduleuses dans la même minute
+            -- (superposé au total dans le graphe pour comparer les deux courbes).
             COUNT(*) FILTER (WHERE fraud_score >= %s) AS fraud_count,
             COALESCE(SUM(amount)/100.0, 0) AS volume_eur
         FROM transactions
+        -- Ne filtre que les 30 dernières minutes : borne le volume de lignes
+        -- remontées côté client à chaque refresh streamlit.
         WHERE created_at >= NOW() - INTERVAL '30 minutes'
+        -- GROUP BY 1 / ORDER BY 1 = par position (colonne "minute") plutôt que
+        -- retaper l'expression DATE_TRUNC ; ORDER BY garantit une courbe chronologique.
         GROUP BY 1 ORDER BY 1
     """, (FRAUD_THRESHOLD,))
 
@@ -191,7 +217,11 @@ def fraud_by_country():
     return pg_query("""
         SELECT ip_country, COUNT(*) AS fraud_count
         FROM transactions
+        -- Ne garde que les transactions déjà au-dessus du seuil de fraude ;
+        -- ip_country IS NOT NULL exclut les transactions sans géolocalisation résolue.
         WHERE fraud_score >= %s AND ip_country IS NOT NULL
+        -- Un pays par groupe, trié par nombre de fraudes décroissant, tronqué au top 10
+        -- pour tenir dans le graphe en barres horizontales du dashboard.
         GROUP BY ip_country ORDER BY fraud_count DESC LIMIT 10
     """, (FRAUD_THRESHOLD,))
 
@@ -204,10 +234,18 @@ def top_merchants():
     return pg_query("""
         SELECT
             m.name,
+            -- Nombre total de transactions du marchand, succeeded ou non
+            -- (contrairement au gmv ci-dessous qui ne compte que les paiements réussis).
             COUNT(t.txn_id) AS txn_count,
+            -- GMV = Gross Merchandise Value : somme des montants encaissés avec succès
+            -- uniquement (les échecs ne génèrent pas de revenu réel pour le marchand).
             COALESCE(SUM(t.amount) FILTER (WHERE t.status='succeeded')/100.0, 0) AS gmv
         FROM merchants m
+        -- INNER JOIN volontaire (pas LEFT) : un marchand sans transaction n'a pas sa
+        -- place dans un classement "top marchands par volume d'affaires".
         JOIN transactions t ON t.merchant_id = m.merchant_id
+        -- Regroupé par marchand (merchant_id + name, la clé + son libellé) puis
+        -- trié par GMV décroissant, limité au top 8 pour l'affichage en graphe.
         GROUP BY m.merchant_id, m.name ORDER BY gmv DESC LIMIT 8
     """)
 
@@ -225,15 +263,27 @@ def fraud_alerts_mongo(limit=20):
         return []
     try:
         return list(db.fraud_alerts.find(
-            {}, {"_id": 0},
-            sort=[("created_at", -1)],
+            {},                     # pas de filtre : toutes les alertes (review + block confondus)
+            {"_id": 0},             # projection : exclut l'ObjectId Mongo, inutile côté UI
+            sort=[("created_at", -1)],  # plus récentes d'abord
             limit=limit
         ))
     except Exception:
         return []
 
 def redis_stats(customer_ids):
-    """Récupère les velocities Redis pour quelques clients."""
+    """Récupère les compteurs de vélocité (nb transactions 1h/24h) depuis Redis.
+
+    Ces compteurs sont les mêmes features (sorted sets `v1h_<id>`/`v24h_<id>`)
+    que celles utilisées par le scorer fraude en temps réel — affichées ici
+    à titre illustratif pour la démo, pas pour recalculer un score.
+
+    Args:
+        customer_ids (list): IDs clients à interroger (échantillonnés à 5 max).
+
+    Returns:
+        dict: {customer_id_tronqué: {"v1h": int, "v24h": int}}.
+    """
     r = get_redis()
     if r is None or not customer_ids:
         return {}
@@ -258,7 +308,10 @@ def recent_suspicious():
         SELECT t.txn_id, t.amount/100.0 AS amount_eur, t.currency,
                t.fraud_score, t.ip_country, t.device_type, t.created_at
         FROM transactions t
+        -- Seuil 0.6 = REVIEW_THRESHOLD (pas FRAUD_THRESHOLD 0.85) : on veut voir
+        -- ici toute la zone "à surveiller", pas seulement les transactions bloquées.
         WHERE t.fraud_score >= 0.6
+        -- Les plus récentes en premier, limité à 15 lignes pour la table du dashboard.
         ORDER BY t.created_at DESC LIMIT 15
     """)
 
@@ -276,6 +329,8 @@ with st.sidebar:
     # Status des services
     st.subheader("Services")
     # Vérification "best effort" de disponibilité des services pour feedback instantané.
+    # get_pg() est rappelé deux fois mais reste bon marché : @st.cache_resource(ttl=3)
+    # renvoie la même connexion tant que le cache n'a pas expiré.
     pg_ok = get_pg() is not None and not get_pg().closed
     redis_ok = get_redis() is not None
     mongo_ok = get_mongo() is not None

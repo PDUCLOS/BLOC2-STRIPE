@@ -198,7 +198,12 @@ def test_pg_materialized_views():
 
 
 def test_pg_amount_bigint():
-    """Vérifie que amount est bien BIGINT (pas FLOAT)."""
+    """Vérifie que amount est bien BIGINT (pas FLOAT).
+
+    Les montants sont stockés en centimes (entiers) pour éviter les erreurs
+    d'arrondi propres aux flottants sur des calculs financiers — un FLOAT
+    introduirait un risque de dérive centime par centime sur les agrégats.
+    """
     conn = psycopg2.connect(**PG_CONFIG)
     with conn.cursor() as cur:
         cur.execute("""
