@@ -95,6 +95,11 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    env:
+      # docker-compose.yml fixe platform: ${DOCKER_PLATFORM:-linux/arm64} (Mac M-series).
+      # Le runner GitHub est x86_64 : sans cette variable, Kafka et Debezium
+      # démarrent en ARM64 et échouent avec « exec format error ».
+      DOCKER_PLATFORM: linux/amd64
     steps:
       - uses: actions/checkout@v4
 
