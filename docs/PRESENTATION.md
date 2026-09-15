@@ -389,7 +389,7 @@ fact_transactions ──────── dim_merchants
 - Si `drift_share > ML_DRIFT_THRESHOLD` (0.3 par défaut) OU `recall < ML_MIN_RECALL` (0.7 par défaut) : déclenche automatiquement `ml/train_fraud_model.py` — un cooldown (3× l'intervalle) évite de relancer un entraînement à chaque cycle tant que le problème persiste
 - Chaque cycle écrit un document dans `MongoDB.ml_monitoring` (statut, drift, performance, décision de réentraînement) — c'est ce que lit l'onglet "Performance ML" du dashboard
 
-**Limite assumée (documentée dans `ml/monitor.py`) :** le scorer déjà en cours d'exécution garde le modèle chargé en mémoire (`ml/scoring.py` le cache après le premier chargement) — un réentraînement écrase bien le `.pkl` sur disque, mais le scorer ne le recharge qu'à son prochain redémarrage, pas à chaud. Un vrai hot-reload (watcher de fichier) est listé comme amélioration plutôt qu'implémenté, pour ne pas ajouter d'I/O disque à chaque transaction scorée.
+**Rechargement à chaud :** `ml/scoring.py::load_model()` revérifie le `mtime` du `.pkl` et recharge le modèle s'il a été réécrit : un réentraînement déclenché par `ml-monitor` est pris en compte par le scorer déjà lancé, sans redémarrage. Le coût est un `stat()` du fichier par appel, négligeable devant l'inférence.
 
 **Pourquoi deux ports non-standards (5001, 8090) ?** MLflow écoute nativement sur 5000 et Airflow sur 8080, mais ces deux ports sont déjà pris par d'autres process sur une machine de dev typique (AirPlay Receiver macOS pour 5000, un autre stack Airflow local pour 8080 dans notre cas) — remappés côté host uniquement, les conteneurs communiquent toujours en interne sur leurs ports standards.
 
@@ -603,8 +603,8 @@ conditions réelles (stack Docker complète) :
 ### 8.2 Limites restantes de la démo
 
 - **Pas de vrai cluster Flink** : job Python "Flink-like" qui imite la logique DataStream. Causé par les bugs de build PyFlink sur ARM64 (numpy 1.21.4, JDK headers, ClassCastException [B).
-- **Pas de CI/CD** : pas de GitHub Actions, pas de tests unitaires pytest (uniquement des E2E : `tests/test_e2e.py`, `tests/test_ml_model.py`).
-- **Pas de hot-reload du modèle** : un réentraînement automatique écrase le `.pkl` sur disque, mais le scorer déjà lancé continue sur l'ancienne version en mémoire jusqu'à son prochain redémarrage (cf. §3.8).
+- **CI encore jamais exécutée sur GitHub** : `.github/workflows/ci.yml` (jobs `lint`, `e2e`, `terraform`) est dans le dépôt et ses commandes passent en local (`make test`, `make queries-check`, `make tf-validate`), mais le premier run n'aura lieu qu'au prochain push.
+- **Modèle écrasé à chaque réentraînement** : le rechargement à chaud prend bien la nouvelle version, mais l'ancienne n'est conservée que dans MLflow ; pas de retour arrière automatique si la nouvelle version est moins bonne (cf. §3.8).
 - **Airflow en mode standalone** (SQLite, SequentialExecutor, un seul process) : suffisant pour démontrer l'orchestration, pas dimensionné pour un vrai débit de DAGs concurrents.
 - **`analytics_reader`** limite l'accès en lecture à `payment_methods.fingerprint`, mais aucun rôle équivalent n'existe encore côté MongoDB (un seul utilisateur applicatif `stripe_app` avec `readWrite` complet).
 - **Snowflake reste en dry-run** sans compte trial réel configuré — le DAG et le script d'export tournent bout en bout, mais rien n'est physiquement chargé dans un warehouse tant que `SNOWFLAKE_ACCOUNT` n'est pas renseigné.
@@ -617,7 +617,7 @@ conditions réelles (stack Docker complète) :
 4. **A/B testing** : servir 2 versions du modèle en parallèle en comparant leurs `model_version` respectifs sur le même trafic (le mécanisme de traçage existe déjà, pas encore le routing différencié)
 5. **Backfill** : rejouer l'historique sur un nouveau modèle pour mesurer l'amélioration avant bascule complète
 6. **GDPR data subject access request** : endpoint API pour qu'un user demande toutes ses données
-7. **Hot-reload du modèle** dans le scorer (watcher de fichier ou polling du `mtime` du `.pkl`)
+7. **Retour arrière automatique du modèle** : comparer la précision servie avant/après réentraînement et restaurer la version MLflow précédente si elle baisse
 8. **RBAC MongoDB** équivalent à `analytics_reader` côté Postgres
 
 ---

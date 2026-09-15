@@ -271,12 +271,8 @@ def main():
 if __name__ == "__main__":
     main()
 
-# NOTE — limite assumée : ml/scoring.py met le modèle en cache mémoire après
-# le premier chargement (cf. load_model()) et ne le recharge jamais tant que
-# le process scorer tourne. Un réentraînement déclenché ici écrase bien le
-# fichier .pkl sur disque, mais le scorer déjà en cours d'exécution continue
-# à utiliser l'ancienne version en mémoire jusqu'à son prochain redémarrage.
-# Un vrai hot-reload (watcher de fichier, ou polling périodique du mtime du
-# .pkl dans load_model()) est listé comme amélioration dans
-# docs/ML_INTEGRATION_STRATEGY.md plutôt qu'implémenté ici, pour ne pas
-# complexifier le chemin d'inférence chaud avec une I/O disque par appel.
+# NOTE — rechargement à chaud : un réentraînement déclenché ici réécrit le .pkl ;
+# ml/scoring.py::load_model() compare son mtime à celui du modèle en cache et le
+# recharge, donc le scorer déjà lancé passe sur la nouvelle version sans
+# redémarrage. Limite restante : pas de retour arrière automatique si la
+# nouvelle version est moins bonne (l'ancienne reste disponible dans MLflow).

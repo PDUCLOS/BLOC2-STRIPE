@@ -1,6 +1,6 @@
 # Speech de soutenance — Bloc 2 Stripe (5 minutes)
 
-**Rythme visé : environ 130 mots par minute.** Le texte compte environ 600 mots, soit 4 min 30 à débit calme : il reste 30 secondes pour respirer et changer de slide.
+**Rythme visé : environ 130 mots par minute.** Le texte compte environ 650 mots, soit 4 min 58 à débit calme : il reste 30 secondes pour respirer et changer de slide.
 Les minutages sont cumulés. Les passages entre crochets sont des indications pour vous : ne les lisez pas à voix haute.
 
 ---
@@ -55,27 +55,27 @@ MongoDB reçoit ce qui n'a pas de schéma fixe : logs, alertes, clickstream, fea
 J'**embarque** ce qui est lu ensemble et je **référence** les données PostgreSQL par UUID.
 Des index TTL purgent les logs après 90 jours : le RGPD est appliqué par la base elle-même.
 
-### Slide 11 — Détection de fraude en temps réel · 3:30 → 4:10
+### Slide 10 — Détection de fraude en temps réel · 3:30 → 4:10
 
-Le cœur du projet : la fraude en temps réel, avec un objectif de décision sous 100 millisecondes.
-Deux moteurs : des règles, et un modèle **XGBoost**. Si le modèle manque, on revient automatiquement aux règles.
-Au-delà de 0,6, revue. Au-delà de 0,85, blocage.
-En production locale, sur le trafic réellement scoré, le modèle bloque **96 % des fraudes** avec **93 % de précision**. Chaque décision de blocage laisse une trace dans la table `fraud_indicators`, écrite dans la même transaction que le score.
-Chaque entraînement est tracé dans **MLflow**. **Evidently** surveille la dérive et la performance, et relance un entraînement si la qualité baisse.
+Le cœur du projet : la fraude en temps réel, décidée en moins de 100 millisecondes.
+Deux moteurs : un modèle **XGBoost**, et des règles en repli automatique.
+Au-delà de 0,6, revue ; au-delà de 0,85, blocage.
+Sur le trafic réellement scoré, le modèle bloque **96 % des fraudes** avec **93 % de précision**, et chaque blocage est tracé dans `fraud_indicators`, dans la même transaction que le score.
+**MLflow** trace les entraînements ; **Evidently** surveille la dérive et relance un entraînement si la qualité baisse.
 
-### Slide 12 — Du PoC local à la cible cloud · 4:10 → 4:35
+### Slide 11 — Du PoC local à la cible cloud · 4:10 → 4:35
 
 Pour tenir le budget, j'ai construit un PoC local, mais complet.
-La cible cloud garde la même logique ; seuls les composants changent : RDS Multi-AZ, MSK, ElastiCache, Atlas en PrivateLink, ECS Fargate et MWAA.
-Elle est écrite en **Terraform** dans le dépôt : dix modules, validés à chaque push par la CI, mais jamais appliqués faute de compte AWS. Sécurité par KMS, IAM et Secrets Manager ; FinOps chiffré à environ 3 100 dollars par mois en prod, avec un budget et des alertes dans le code.
-*[La slide 14, cible AWS détaillée, et la slide 16, structure du code, restent en réserve pour les questions.]*
+La cible cloud garde la même logique avec des services managés : RDS Multi-AZ, MSK, ElastiCache, Atlas, ECS Fargate et MWAA.
+Elle est écrite en **Terraform** : neuf modules validés, jamais appliqués faute de compte AWS. Sécurité par KMS, IAM et Secrets Manager ; coût chiffré à environ 3 100 dollars par mois en production.
+*[Annexes après le résumé, à montrer seulement si le jury pose la question : slide 14 structure MongoDB, slide 15 cible AWS, slide 16 structure du code.]*
 
-### Slide 13 — Qualité, données et restitution · 4:35 → 4:50
+### Slide 12 — Qualité, données et restitution · 4:35 → 4:50
 
-Tout ce que j'affirme se vérifie : seize tests de bout en bout au vert, neuf requêtes SQL et onze requêtes MongoDB exécutées sur la stack, l'effacement RGPD par `anonymize_customer()`.
-Le dashboard, sur localhost:8501 avec le compte de démo `admin` / `Bloc2-Demo-2026`, montre les KPIs et, dans l'onglet Performance ML, la dérive et la précision réellement servie.
+Tout se vérifie : seize tests de bout en bout au vert, vingt requêtes SQL et MongoDB exécutées sur la stack, et l'effacement RGPD par `anonymize_customer()`.
+Le dashboard, compte de démo `admin` / `Bloc2-Demo-2026`, montre les KPIs et la précision réellement servie.
 
-### Slide 15 — En résumé · 4:50 → 5:00
+### Slide 13 — En résumé · 4:50 → 5:00
 
 En résumé : chaque système est à sa place, le CDC découple tout sans ralentir les paiements, la fraude est scorée en temps réel par un modèle surveillé, et ce PoC est prêt pour le cloud.
 Merci. Je suis prêt pour la démonstration et vos questions.

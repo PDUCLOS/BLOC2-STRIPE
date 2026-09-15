@@ -254,7 +254,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 |---|---|---|---|
 | `features.py` | Module | Feature engineering partagée entraînement/inférence (même vecteur des deux côtés) | [→](../ml/features.py) |
 | `train_fraud_model.py` | Script | Entraîne XGBoost sur l'historique Postgres, trace le run dans MLflow, sauvegarde le `.pkl` | [→](../ml/train_fraud_model.py) |
-| `scoring.py` | Module | Charge le modèle (cache mémoire) et prédit — utilisé par `flink_like_job.py` | [→](../ml/scoring.py) |
+| `scoring.py` | Module | Charge le modèle (cache mémoire rechargé quand le `mtime` du `.pkl` change) et prédit — utilisé par `flink_like_job.py` | [→](../ml/scoring.py) |
 | `monitor.py` | Script | Boucle continue : drift Evidently + performance live + réentraînement auto | [→](../ml/monitor.py) |
 | `Dockerfile` | Infra | Image du service `ml-monitor` | [→](../ml/Dockerfile) |
 | `models/` | Généré (gitignored) | `.pkl` + `.meta.json` produits par `make ml-train` | — |
@@ -598,7 +598,7 @@ import _env  # noqa: F401
 2. Si le fichier `.pkl` n'existe pas (pas encore entraîné) : renvoie `None`, jamais d'exception — c'est ce `None` que `flink_like_job.py` interprète comme "retombe sur les règles"
 3. `score()` — construit le vecteur de features (`ml/features.py`) et renvoie `model.predict_proba(...)[0, 1]`
 
-**Point d'attention** : le cache mémoire ne se rafraîchit jamais tant que le process tourne — un réentraînement (manuel ou via `ml/monitor.py`) écrase le fichier, mais un scorer déjà lancé continue sur l'ancienne version jusqu'à son redémarrage (limite documentée, cf. `PRESENTATION.md` §3.8).
+**Rechargement à chaud** : `load_model()` compare le `mtime` du `.pkl` à celui du modèle en cache et le recharge s'il a changé ; un réentraînement (manuel ou via `ml/monitor.py`) est donc pris en compte par un scorer déjà lancé, sans redémarrage. Ce mécanisme a été ajouté après un incident où deux réentraînements automatiques n'avaient jamais été chargés (`docs/ML_INTEGRATION_STRATEGY.md`).
 
 ---
 

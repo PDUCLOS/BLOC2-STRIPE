@@ -43,7 +43,7 @@ http://localhost:5001, Airflow (profil `airflow`) et le dépôt GitHub (onglet A
 | 6 | 0:20 | MLflow | Expérience `fraud-detector`, dernier run | « Chaque entraînement, manuel ou automatique, est tracé avec ses métriques. » |
 | 7 | 0:30 | Terminal | `make queries-check \| tail -25` | « Les requêtes SQL et MongoDB du livrable s'exécutent sur la stack à chaque push. Ici la précision servie et l'anonymisation RGPD, jouée puis annulée. » |
 | 8 | 0:25 | Terminal | `make test \| tail -8` | « Seize contrôles de bout en bout, tous verts. » |
-| 9 | 0:35 | Éditeur puis terminal | Ouvrir `terraform/stack/main.tf`, puis `make tf-validate` | « La cible AWS est écrite en Terraform : dix modules, validés en CI. Elle n'a pas été appliquée faute de compte, je le dis clairement. » |
+| 9 | 0:35 | Éditeur puis terminal | Ouvrir `terraform/stack/main.tf`, puis `make tf-validate` | « La cible AWS est écrite en Terraform : neuf modules, validés en CI. Elle n'a pas été appliquée faute de compte, je le dis clairement. » |
 | 10 | 0:20 | Diagramme `stripe_aws_cible.png` | — | « VPC sur trois zones, bases sans accès Internet, tout chiffré par KMS. Environ 3 100 dollars par mois en production. » |
 | 11 | 0:20 | GitHub, onglet Actions | Dernier run vert | « Lint, test de bout en bout sur la stack complète et validation Terraform à chaque push. » |
 
