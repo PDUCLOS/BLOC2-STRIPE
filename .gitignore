@@ -43,3 +43,11 @@ logs/
 # === Fichiers temporaires draw.io ===
 .$*.bkp
 .$*.dtmp
+
+# === Terraform (state et secrets jamais versionnés ; .terraform.lock.hcl OUI) ===
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+terraform.tfvars
+crash.log

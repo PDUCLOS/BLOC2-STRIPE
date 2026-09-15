@@ -171,6 +171,23 @@ snowflake-export:
 refresh-views:
 	@$(PYTHON) etl/refresh_views.py
 
+# Livrable 8 : exécute toutes les requêtes de queries/ sur la stack qui tourne.
+# ON_ERROR_STOP=1 (psql) et mongosh --file s'arrêtent au premier échec : une
+# requête désalignée du schéma réel fait échouer la cible (et la CI).
+# queries/snowflake_olap.sql n'est pas exécuté (Snowflake en dry-run).
+.PHONY: queries-check
+queries-check:
+	@echo "── PostgreSQL : refresh des vues matérialisées puis queries/postgres_oltp.sql ──"
+	@docker exec stripe-postgres psql -q -U $(PG_USER) -d $(PG_DB) \
+		-c "REFRESH MATERIALIZED VIEW mv_daily_revenue; REFRESH MATERIALIZED VIEW mv_merchant_stats;"
+	@docker exec -i stripe-postgres psql -v ON_ERROR_STOP=1 -U $(PG_USER) -d $(PG_DB) < queries/postgres_oltp.sql
+	@echo "── MongoDB : queries/mongodb_queries.js (utilisateur applicatif, lecture seule) ──"
+	@docker exec -i stripe-mongo sh -c 'cat > /tmp/mongodb_queries.js' < queries/mongodb_queries.js
+	@docker exec stripe-mongo mongosh --quiet \
+		-u "$(MONGO_APP_USER)" -p "$(MONGO_APP_PASSWORD)" --authenticationDatabase $(MONGO_DB) \
+		--file /tmp/mongodb_queries.js
+	@echo "[OK] Toutes les requêtes SQL et NoSQL s'exécutent sur la stack"
+
 # ─────────────────────────────────────────────────────────
 # Machine Learning
 # ─────────────────────────────────────────────────────────
@@ -199,6 +216,18 @@ smoke:
 	@docker exec stripe-kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null | wc -l | xargs echo "  Topics count:"
 	@echo "  Debezium :"
 	@curl -fsS $(KAFKA_CONNECT_URL)/connectors/stripe-postgres-cdc/status 2>/dev/null | python3 -c "import sys, json; d = json.load(sys.stdin); print(f\"  State: {d['connector']['state']}\")"
+
+# ─────────────────────────────────────────────────────────
+# Infrastructure as Code (cible AWS) — cf. terraform/README.md
+# ─────────────────────────────────────────────────────────
+.PHONY: tf-validate
+tf-validate:
+	@terraform -chdir=terraform fmt -recursive -check
+	@for dir in bootstrap envs/dev envs/prod; do \
+		terraform -chdir=terraform/$$dir init -backend=false -input=false >/dev/null && \
+		terraform -chdir=terraform/$$dir validate || exit 1; \
+	done
+	@echo "[OK] Terraform valide (fmt + validate sur bootstrap, dev, prod)"
 
 # ─────────────────────────────────────────────────────────
 # Help
@@ -238,4 +267,6 @@ help:
 	@echo ""
 	@echo "  Tests :"
 	@echo "    make test          Lance le test E2E"
+	@echo "    make queries-check Exécute queries/*.sql et queries/*.js sur la stack"
+	@echo "    make tf-validate   Vérifie terraform/ (fmt + validate, sans compte AWS)"
 	@echo "    make smoke         Vérifie que tous les services répondent"

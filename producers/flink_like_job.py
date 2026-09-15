@@ -417,6 +417,17 @@ def main():
 
         # Write-back fraud_score dans Postgres (optionnel, mais ferme la boucle)
         # et aligne le dashboard OLTP avec la décision temps réel.
+        #
+        # Deux écritures dans UNE seule transaction Postgres (atomicité ACID) :
+        #   1. UPDATE transactions.fraud_score — source : score calculé ci-dessus
+        #      (score_transaction), clé : txn_id reçu du CDC Debezium.
+        #   2. INSERT fraud_indicators — uniquement pour les décisions review/block,
+        #      et uniquement si l'UPDATE a réellement modifié la ligne (rowcount=1).
+        # Le filtre `fraud_score IS NULL` rend l'ensemble idempotent : un message
+        # CDC rejoué (redémarrage consumer, rééquilibrage Kafka) ou l'événement
+        # CDC généré par notre propre UPDATE ne produit ni second score ni
+        # indicateur en double. Si l'INSERT échoue, le rollback annule aussi
+        # l'UPDATE : jamais de score "block" sans sa trace dans fraud_indicators.
         if pg_conn is not None and scored.get("fraud_score") is not None:
             try:
                 with pg_conn.cursor() as cur:
@@ -426,6 +437,21 @@ def main():
                            WHERE txn_id = %s AND fraud_score IS NULL""",
                         (scored["fraud_score"], scored["txn_id"]),
                     )
+                    if cur.rowcount == 1 and scored.get("decision") in ("review", "block"):
+                        cur.execute(
+                            """INSERT INTO fraud_indicators
+                                   (txn_id, anomaly_score, rules_triggered, model_version, decision)
+                               VALUES (%s, %s, %s, %s, %s)""",
+                            (
+                                scored["txn_id"],
+                                scored["fraud_score"],
+                                # TEXT[] Postgres ← list Python (psycopg2 adapte nativement).
+                                # Vide pour xgboost-v1 : le modèle ne produit pas de règles.
+                                scored.get("rules_triggered") or [],
+                                scored.get("model_version"),
+                                scored["decision"],
+                            ),
+                        )
                 pg_conn.commit()
                 writeback_count += 1
             except psycopg2.Error as e:

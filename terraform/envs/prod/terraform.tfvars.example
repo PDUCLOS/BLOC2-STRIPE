@@ -1,0 +1,4 @@
+# Copier en terraform.tfvars (ignoré par git) et renseigner.
+atlas_org_id = "000000000000000000000000"
+alert_email  = "astreinte@example.com"
+image_tag    = "sha-0000000" # toujours un tag déjà validé en dev, jamais "latest"

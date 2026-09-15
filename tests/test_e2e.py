@@ -149,6 +149,9 @@ def test_pg_transaction_insert():
 
         # Nettoyage
         with conn.cursor() as cur:
+            # fraud_indicators référence transactions (FK) : on supprime d'abord
+            # l'indicateur éventuellement écrit par le scorer, sinon DELETE échoue.
+            cur.execute("DELETE FROM fraud_indicators WHERE txn_id = %s", (txn_id,))
             cur.execute("DELETE FROM transactions WHERE txn_id = %s", (txn_id,))
         conn.commit()
     finally:
@@ -184,6 +187,9 @@ def test_pg_idempotency():
         assert raised, "Unique constraint sur idempotency_key non déclenché"
 
         with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM fraud_indicators WHERE txn_id IN "
+                "(SELECT txn_id FROM transactions WHERE idempotency_key = %s)", (idem,))
             cur.execute("DELETE FROM transactions WHERE idempotency_key = %s", (idem,))
         conn.commit()
     finally:
@@ -397,8 +403,27 @@ def test_pipeline_fraud_scoring_high_amount():
                 "fraud_score non mis à jour après 10s — flink_like_job.py tourne-t-il ?"
             )
 
+        # Le write-back écrit fraud_score ET fraud_indicators dans la même
+        # transaction Postgres : si le score dépasse le seuil de review, la
+        # trace doit exister au moment où le score est visible (pas d'attente).
+        score_val = float(row["fraud_score"])
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT decision, anomaly_score, model_version FROM fraud_indicators WHERE txn_id = %s",
+                (txn_id,))
+            indicators = cur.fetchall()
+        if score_val >= REVIEW_THRESHOLD and len(indicators) != 1:
+            raise AssertionError(
+                f"score {score_val} >= {REVIEW_THRESHOLD} mais {len(indicators)} ligne(s) fraud_indicators (attendu 1)"
+            )
+        if score_val < REVIEW_THRESHOLD and indicators:
+            raise AssertionError(f"score {score_val} < seuil review mais fraud_indicators non vide")
+
         # Nettoyage
         with conn.cursor() as cur:
+            # fraud_indicators référence transactions (FK) : on supprime d'abord
+            # l'indicateur éventuellement écrit par le scorer, sinon DELETE échoue.
+            cur.execute("DELETE FROM fraud_indicators WHERE txn_id = %s", (txn_id,))
             cur.execute("DELETE FROM transactions WHERE txn_id = %s", (txn_id,))
         conn.commit()
     finally:
@@ -438,7 +463,7 @@ def main():
 
     # Pipeline E2E
     print("\n── Pipeline E2E (nécessite pipeline actif) ──")
-    check("Scoring fraude — montant élevé (>100k centimes)", test_pipeline_fraud_scoring_high_amount)
+    check("Scoring fraude — montant élevé + trace fraud_indicators", test_pipeline_fraud_scoring_high_amount)
 
     # Résumé
     passed = sum(1 for r in results if r[0] == PASS)

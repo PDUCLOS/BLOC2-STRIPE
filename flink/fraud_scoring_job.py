@@ -190,11 +190,22 @@ class FraudScoringFunction(MapFunction):
                     host=PG_HOST, dbname=PG_DB,
                     user=PG_USER, password=PG_PASSWORD
                 )
+                # Même contrat que producers/flink_like_job.py : UPDATE idempotent
+                # (fraud_score IS NULL) + INSERT fraud_indicators pour review/block,
+                # dans une seule transaction Postgres.
                 with conn.cursor() as cur:
                     cur.execute(
-                        "UPDATE transactions SET fraud_score = %s WHERE txn_id = %s::uuid",
+                        "UPDATE transactions SET fraud_score = %s "
+                        "WHERE txn_id = %s::uuid AND fraud_score IS NULL",
                         (score, txn_id)
                     )
+                    if cur.rowcount == 1 and decision in ("review", "block"):
+                        cur.execute(
+                            "INSERT INTO fraud_indicators "
+                            "(txn_id, anomaly_score, rules_triggered, model_version, decision) "
+                            "VALUES (%s::uuid, %s, %s, %s, %s)",
+                            (txn_id, score, rules, "rule-based-v1", decision)
+                        )
                 conn.commit()
                 conn.close()
             except Exception:

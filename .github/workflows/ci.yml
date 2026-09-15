@@ -54,6 +54,33 @@ jobs:
         run: docker compose config -q
 
   # ───────────────────────────────────────────────────────────────────────
+  # Infrastructure as Code — vérifie que terraform/ est syntaxiquement et
+  # sémantiquement valide (types, références entre modules, arguments des
+  # providers) sans compte AWS : init -backend=false ne touche aucun state.
+  # Un `terraform plan` réel exigerait des credentials AWS/Atlas (OIDC) :
+  # volontairement hors CI tant qu'aucun compte cible n'est provisionné.
+  # ───────────────────────────────────────────────────────────────────────
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.10.5"
+
+      - name: terraform fmt -check
+        run: terraform -chdir=terraform fmt -recursive -check -diff
+
+      - name: terraform validate (bootstrap, dev, prod)
+        run: |
+          for dir in bootstrap envs/dev envs/prod; do
+            echo "── $dir ──"
+            terraform -chdir=terraform/$dir init -backend=false -input=false
+            terraform -chdir=terraform/$dir validate
+          done
+
+  # ───────────────────────────────────────────────────────────────────────
   # Test d'intégration bout en bout — monte TOUTE la stack polyglotte
   # (Postgres, Debezium, Kafka, Redis, MongoDB, le scorer) sur le runner,
   # fait circuler du vrai trafic, et lance la même suite que
@@ -131,6 +158,9 @@ jobs:
 
       - name: make test (tests/test_e2e.py)
         run: make test
+
+      - name: make queries-check (livrable 8 — requêtes SQL et NoSQL)
+        run: make queries-check
 
       - name: make notebook-check (audit données/ML)
         run: |
