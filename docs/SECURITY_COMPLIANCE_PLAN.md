@@ -83,6 +83,20 @@ avec authentification (`authSource=admin`), Redis avec mot de passe
 par collection en l'état — un seul utilisateur applicatif pour l'ensemble
 des services (acceptable pour une démo locale, à segmenter en prod).
 
+### 3.4 — Authentification du dashboard
+
+Le dashboard Streamlit ([`dashboard/app.py`](../dashboard/app.py),
+`require_login()`) exige une authentification avant tout rendu de données —
+aucune requête Postgres/Mongo/Redis n'est déclenchée pour un visiteur non
+authentifié.
+
+| Mécanisme | Implémentation |
+|---|---|
+| Stockage du mot de passe | Jamais en clair — seul `SHA-256(mot de passe)` vit dans `.env` (`DASHBOARD_PASSWORD_HASH`), généré par `make init-env` (`scripts/init_env.sh`) qui affiche le mot de passe en clair **une seule fois**, à la génération |
+| Comparaison | `hmac.compare_digest` (temps constant) sur le login et le hash, pour ne pas fuiter d'information via le timing de réponse |
+| Anti-bruteforce | Verrouillage temporaire après `DASHBOARD_MAX_LOGIN_ATTEMPTS` (5 par défaut) échecs, pendant `DASHBOARD_LOCKOUT_SECONDS` (60s) — compteur en `st.session_state`, donc par session navigateur, pas persistant côté serveur |
+| Portée | Un seul compte de démo (`DASHBOARD_USERNAME=admin`) — pas de RBAC multi-utilisateurs ; en production, remplacer par un IdP (OAuth2/OIDC) devant un reverse proxy plutôt qu'une authentification applicative maison |
+
 ---
 
 ## 4. Chiffrement

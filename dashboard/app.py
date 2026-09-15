@@ -6,6 +6,8 @@ Streamlit live : KPIs fraude, transactions, alertes MongoDB, vélocité Redis
 Usage : make dashboard   (ou ./venv/bin/python -m streamlit run dashboard/app.py)
 URL   : http://localhost:8501
 """
+import hashlib
+import hmac
 import json
 import os
 import sys
@@ -72,6 +74,79 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+
+# ── Authentification ──────────────────────────────────────────────────────────
+# Contrôle d'accès minimal mais réel avant toute donnée : le dashboard expose
+# des montants, pays, scores de fraude par client — pas de contenu métier
+# sans passer par ici. Le mot de passe n'est jamais comparé/stocké en clair,
+# seul son hash SHA-256 vit dans .env (généré par make init-env, cf.
+# scripts/init_env.sh) ; comparaison en temps constant (hmac.compare_digest)
+# pour ne pas fuiter d'information via le timing de la requête.
+DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "")
+DASHBOARD_PASSWORD_HASH = os.environ.get("DASHBOARD_PASSWORD_HASH", "")
+MAX_LOGIN_ATTEMPTS = int(os.environ.get("DASHBOARD_MAX_LOGIN_ATTEMPTS", 5))
+LOCKOUT_SECONDS = int(os.environ.get("DASHBOARD_LOCKOUT_SECONDS", 60))
+
+
+def _check_credentials(username: str, password: str) -> bool:
+    """Compare en temps constant pour ne pas laisser fuiter, via la durée de
+    réponse, la position du premier caractère qui diffère (timing attack)."""
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    user_ok = hmac.compare_digest(username, DASHBOARD_USERNAME)
+    pass_ok = hmac.compare_digest(password_hash, DASHBOARD_PASSWORD_HASH)
+    return user_ok and pass_ok
+
+
+def require_login():
+    """Bloque tout rendu tant que l'utilisateur n'est pas authentifié.
+    Verrouillage temporaire après N échecs pour ralentir un bruteforce —
+    ça ne remplace pas un vrai IAM en prod, mais démontre le principe pour
+    un accès qui n'a, ici, qu'un seul compte de démo."""
+    if st.session_state.get("authenticated"):
+        return
+
+    if not DASHBOARD_PASSWORD_HASH:
+        st.error(
+            "Authentification non configurée : DASHBOARD_PASSWORD_HASH est vide dans .env.\n\n"
+            "Lance `make init-env` (génère un mot de passe aléatoire et affiche son hash une fois)."
+        )
+        st.stop()
+
+    st.session_state.setdefault("login_attempts", 0)
+    st.session_state.setdefault("locked_until", 0.0)
+
+    now = time.time()
+    locked_remaining = st.session_state["locked_until"] - now
+    if locked_remaining > 0:
+        st.title(":credit_card: Stripe Polyglot — Dashboard")
+        st.error(f"Trop de tentatives échouées. Réessaie dans {int(locked_remaining) + 1}s.")
+        st.stop()
+
+    st.title(":credit_card: Stripe Polyglot — Dashboard")
+    st.caption("Accès restreint — données financières et de fraude.")
+    with st.form("login_form"):
+        username = st.text_input("Utilisateur")
+        password = st.text_input("Mot de passe", type="password")
+        submitted = st.form_submit_button("Se connecter")
+
+    if submitted:
+        if _check_credentials(username, password):
+            st.session_state["authenticated"] = True
+            st.session_state["login_attempts"] = 0
+            st.rerun()
+        else:
+            st.session_state["login_attempts"] += 1
+            remaining = MAX_LOGIN_ATTEMPTS - st.session_state["login_attempts"]
+            if remaining <= 0:
+                st.session_state["locked_until"] = now + LOCKOUT_SECONDS
+                st.session_state["login_attempts"] = 0
+                st.error(f"Trop de tentatives échouées. Verrouillé {LOCKOUT_SECONDS}s.")
+            else:
+                st.error(f"Identifiants incorrects ({remaining} tentative(s) restante(s)).")
+    st.stop()
+
+
+require_login()
 
 # ── CSS personnalisé ───────────────────────────────────────────────────────────
 st.markdown("""
@@ -394,6 +469,10 @@ with st.sidebar:
     st.markdown('<div style="font-size:1.8rem;font-weight:700;color:#635BFF;">Stripe</div>', unsafe_allow_html=True)
     st.title("Stripe Polyglot")
     st.caption("Certification AIA RNCP41993 — Bloc 2")
+    st.caption(f"Connecté : **{DASHBOARD_USERNAME}**")
+    if st.button("Se déconnecter"):
+        st.session_state["authenticated"] = False
+        st.rerun()
     st.divider()
 
     refresh = st.slider("Auto-refresh (s)", 1, 30, 5)

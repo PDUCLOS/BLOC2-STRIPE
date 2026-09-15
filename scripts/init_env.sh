@@ -16,6 +16,7 @@ cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
 # token_urlsafe(24) donne ~32 chars robustes sans caractères problématiques
 # pour la majorité des shells et URI de connexion.
 python3 - <<'EOF'
+import hashlib
 import secrets
 import re
 from pathlib import Path
@@ -33,6 +34,21 @@ replacements = {
 for k, v in replacements.items():
     # Remplace SEULEMENT les valeurs vides après le =
     content = re.sub(rf"^{re.escape(k)}$", v, content, flags=re.MULTILINE)
+
+# Mot de passe dashboard : généré en clair pour affichage UNIQUE ici, mais
+# seul son hash SHA-256 est écrit dans .env (dashboard/app.py ne compare
+# jamais de mot de passe en clair, cf. require_login()).
+dashboard_password = secrets.token_urlsafe(12)
+dashboard_hash = hashlib.sha256(dashboard_password.encode()).hexdigest()
+content = re.sub(r"^DASHBOARD_PASSWORD_HASH=$", f"DASHBOARD_PASSWORD_HASH={dashboard_hash}",
+                  content, flags=re.MULTILINE)
+
 p.write_text(content)
 print("[OK] .env généré avec des secrets aléatoires")
+print()
+print("=" * 60)
+print("  Identifiants dashboard (à noter — non ré-affichables) :")
+print("    login    : admin")
+print(f"    password : {dashboard_password}")
+print("=" * 60)
 EOF
