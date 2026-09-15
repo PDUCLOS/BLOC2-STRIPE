@@ -1,7 +1,14 @@
 # Stripe Polyglot — Architecture de détection de fraude en temps réel
 
 > Projet Bloc 2 — Certification Jedha Architecte en IA (RNCP 38777)
-> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Snowflake · Airflow · XGBoost · MLflow · Evidently
+> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Airflow · XGBoost · MLflow · Evidently
+>
+> **Snowflake n'est PAS branché dans le pipeline live de cette démo.**
+> Le schéma OLAP (star schema) est conçu et scripté (§3.7), mais sans
+> compte Snowflake réel configuré, `etl/load_snowflake.py` tourne
+> uniquement en dry-run. Aucune donnée n'atterrit jamais dans un vrai
+> warehouse Snowflake dans cette démo — c'est une brique documentée et
+> prête, pas une brique opérationnelle.
 
 ---
 

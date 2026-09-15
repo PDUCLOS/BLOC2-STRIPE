@@ -1,6 +1,11 @@
 # Stripe Polyglot — Démo locale
 
-> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL (OLTP) · MongoDB (logs/features/alertes) · Kafka + Debezium (CDC) · Redis (feature store online) · Scoring fraude temps réel (règles + XGBoost) · MLflow + Evidently (tracking/monitoring ML) · Streamlit (dashboard) · Snowflake (OLAP) · Airflow (orchestration batch).
+> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL (OLTP) · MongoDB (logs/features/alertes) · Kafka + Debezium (CDC) · Redis (feature store online) · Scoring fraude temps réel (règles + XGBoost) · MLflow + Evidently (tracking/monitoring ML) · Streamlit (dashboard) · Airflow (orchestration batch).
+>
+> **Snowflake (OLAP) n'est PAS connecté dans cette démo** — aucun compte
+> trial configuré. `etl/load_snowflake.py` tourne en dry-run (affiche ce
+> qui serait chargé, n'écrit rien) ; le schéma star existe (`make
+> snowflake-setup`) mais n'est jamais peuplé. Voir "Snowflake (optionnel)" plus bas.
 
 **Commentaire précis** : ce README sert de script de démonstration technique. L'ordre des sections suit le parcours réel d'exécution (quickstart -> pipeline live -> vérifications -> tests).
 

@@ -1,0 +1,207 @@
+# Index fichiers & fonctions — Stripe Polyglot
+
+Référence à plat : chaque fichier du repo, son rôle en une ligne, et ses
+fonctions/classes publiques avec ce qu'elles font. Pour l'explication
+narrative (pourquoi ces choix), voir [PRESENTATION.md](PRESENTATION.md) ;
+pour la doc technique complète fichier par fichier avec logique détaillée,
+voir [ARCHITECTURE.md](ARCHITECTURE.md). Ce document est l'index de
+recherche rapide — "où est la fonction X".
+
+---
+
+## Racine
+
+### [`_env.py`](../_env.py)
+Chargeur `.env` universel, importé en tête de **tous** les scripts Python du repo.
+
+| Fonction | Rôle |
+|---|---|
+| `_find_env_file()` | Cherche `.env` : d'abord `cwd`, puis en remontant les parents de `__file__` |
+| *(import seul)* | Charge le `.env` trouvé dans `os.environ` via `python-dotenv`, ou parsing manuel en fallback |
+
+---
+
+## `seed/` — Données initiales
+
+### [`seed_data.py`](../seed/seed_data.py)
+Insère 200 merchants, 5000 customers, ~8000 payment_methods dans Postgres.
+
+| Fonction | Rôle |
+|---|---|
+| `insert_merchants(cur)` | Génère et insère les marchands (Faker, seed=42 pour reproductibilité) |
+| `insert_customers(cur)` | Idem clients — distribution de segments calibrée pour le volume de fraude ciblé |
+| `insert_payment_methods(cur)` | Moyens de paiement par client (loi normale sur le nombre) |
+| `main()` | `TRUNCATE ... CASCADE` puis réinsère tout — reset complet, pas d'ajout incrémental |
+
+---
+
+## `producers/` — Génération, scoring, persistance
+
+### [`transaction_producer.py`](../producers/transaction_producer.py)
+Génère un flux continu de transactions (95% légitimes / 5% fraude).
+
+| Fonction | Rôle |
+|---|---|
+| `pick_merchant(cur)` | Marchand actif aléatoire |
+| `pick_customer_pm(cur, is_fraud)` | Cible les segments `new`/`inactive` si fraude (profil type) |
+| `build_transaction(is_fraud)` | Construit le payload — pose `metadata.is_fraud_pattern`, la **vérité terrain** utilisée par `ml/train_fraud_model.py` |
+| `insert_transaction(cur, txn)` | `INSERT` paramétré dans `transactions` |
+| `main()` | Boucle continue, gère les rafales ("bursts") simulant du card testing |
+
+### [`flink_like_job.py`](../producers/flink_like_job.py)
+Scorer fraude temps réel — lit `stripe.public.transactions`, écrit `fraud_score`.
+
+| Fonction | Rôle |
+|---|---|
+| `signal_handler(sig, frame)` | Arrêt propre sur Ctrl+C/SIGTERM |
+| `score_transaction(txn, r)` | Cœur du scoring — vélocité Redis, puis règles OU `ml.scoring.score()` selon `SCORING_ENGINE` (fallback auto sur règles si modèle absent) |
+| `main()` | `connect_pg()` interne (reconnexion throttlée), boucle consumer Kafka, write-back Postgres |
+
+### [`mongo_writer.py`](../producers/mongo_writer.py)
+Consumer Kafka → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`).
+
+| Fonction | Rôle |
+|---|---|
+| `signal_handler(sig, frame)` | Arrêt propre |
+| `get_mongo_client()` | Construit l'URI selon credentials présents ou non |
+| `main()` | Consomme `stripe.payments.events`, écrit les 3 collections + DLQ si échec de parsing/écriture |
+
+---
+
+## `ml/` — Entraînement, inférence, monitoring
+
+### [`features.py`](../ml/features.py)
+Feature engineering **partagée** entraînement ↔ inférence — point critique pour éviter le skew training/serving.
+
+| Fonction | Rôle |
+|---|---|
+| `build_feature_vector(amount, created_at, ip_country, device_type, velocity_1h, velocity_24h)` | Vecteur `[amount_log, hour_of_day, day_of_week, is_high_risk_country, is_pos_device, velocity_1h, velocity_24h]`, ordre figé (`FEATURE_NAMES`) |
+
+### [`train_fraud_model.py`](../ml/train_fraud_model.py)
+Entraîne XGBoost, trace le run dans MLflow. Point d'entrée : `make ml-train`.
+
+| Fonction | Rôle |
+|---|---|
+| `extract_training_data()` | Requête Postgres, vélocité recalculée par sous-requête SQL corrélée, label = `metadata->>'is_fraud_pattern'` |
+| `extract_current_window(minutes)` | Même requête que ci-dessus, bornée sur une fenêtre récente — **réutilisée par `ml/monitor.py`** |
+| `build_dataset(df)` | DataFrame brut → matrice de features (via `ml.features.build_feature_vector`) + labels |
+| `temporal_train_test_split(df, X, y, test_frac=0.2)` | Split **chronologique** (pas aléatoire) — évite la fuite d'info via la vélocité |
+| `train_model(X_train, y_train)` | `XGBClassifier` avec `scale_pos_weight` calculé dynamiquement |
+| `evaluate_model(model, X_test, y_test)` | precision/recall/f1/ROC AUC |
+| `main()` | Orchestre tout, log MLflow (`mlflow.start_run`, `mlflow.xgboost.log_model`), sauvegarde `.pkl` |
+
+### [`scoring.py`](../ml/scoring.py)
+Inférence — appelée par `producers/flink_like_job.py` quand `SCORING_ENGINE=ml`.
+
+| Fonction | Rôle |
+|---|---|
+| `load_model()` | Chargement paresseux, mis en cache en mémoire (pas de rechargement tant que le process tourne) |
+| `score(amount, created_at, ip_country, device_type, velocity_1h, velocity_24h)` | Renvoie une probabilité, ou `None` si le modèle n'existe pas encore (signal de fallback) |
+
+### [`monitor.py`](../ml/monitor.py)
+Boucle continue (service Docker `ml-monitor`) : drift + performance **réellement servie** + réentraînement auto.
+
+| Fonction | Rôle |
+|---|---|
+| `get_mongo_db()` | Connexion Mongo |
+| `compute_drift(X_reference, X_current)` | Evidently `DataDriftPreset`, renvoie `drift_share` |
+| `_parse_is_fraud(payload)` | Extrait `metadata.is_fraud_pattern` (gère les deux formats vus en pratique : dict natif ou string JSON) |
+| `compute_served_performance(db, window_minutes)` | **Relit ce qui a été RÉELLEMENT décidé** en production (MongoDB `transaction_logs`) — pas une resimulation SQL. Corrige un angle mort découvert en conditions réelles (precision tombée à 0.29 sans que l'ancien check, basé sur SQL, ne le détecte) |
+| `check_once(db, last_retrain_at)` | Un cycle complet : drift + perf servie, déclenche `train_fraud_model.main()` si seuils franchis (cooldown anti-boucle) |
+| `main()` | Boucle infinie, `ML_MONITOR_INTERVAL_SECONDS` entre chaque cycle |
+
+---
+
+## `etl/` — Export Snowflake (⚠ dry-run, pas de compte réel connecté)
+
+### [`snowflake_setup.py`](../etl/snowflake_setup.py)
+Bootstrap **manuel ponctuel** (`make snowflake-setup`) — jamais dans le DAG quotidien.
+
+| Fonction | Rôle |
+|---|---|
+| `run(cur, sql, label)` | Exécute + log, ignore silencieusement les erreurs "already exists" (idempotence) |
+| `main()` | Crée warehouse, DB, schéma, 5 dimensions + `fact_transactions`, pré-peuple `dim_date`/`dim_geography` |
+
+### [`load_snowflake.py`](../etl/load_snowflake.py)
+Export batch quotidien, appelé par le DAG Airflow.
+
+| Fonction | Rôle |
+|---|---|
+| `extract_from_pg(target_date)` | Transactions `succeeded` du jour, JOIN `payment_methods` + `merchants` (nécessaire pour `upsert_dimensions`) |
+| `upsert_dimensions(sf_cur, rows)` | Insère les nouvelles lignes `dim_merchant`/`dim_customer`/`dim_payment_method` **avant** le MERGE des faits — sans ça, les FK des faits seraient NULL |
+| `load_to_snowflake(rows, target_date)` | `MERGE INTO fact_transactions`, dry-run si `SNOWFLAKE_ACCOUNT` absent |
+| `main()` | Extrait puis charge |
+
+### [`refresh_views.py`](../etl/refresh_views.py)
+Rafraîchit `mv_daily_revenue`/`mv_merchant_stats` (Postgres, créées `WITH NO DATA`).
+
+| Fonction | Rôle |
+|---|---|
+| `main()` | `REFRESH MATERIALIZED VIEW CONCURRENTLY`, fallback sans `CONCURRENTLY` au tout premier refresh |
+
+---
+
+## `dashboard/app.py` — Streamlit, 2 onglets
+
+| Fonction | Rôle |
+|---|---|
+| `get_pg()`, `get_redis()`, `get_mongo()` | Connexions mises en cache (`st.cache_resource`, TTL 3s) |
+| `pg_query(sql, params)` | Wrapper SQL générique, retourne un DataFrame vide en cas d'erreur (pas de crash dashboard) |
+| `kpis_from_pg()` | 5 KPIs agrégés en une requête (`FILTER`) |
+| `txn_over_time()` | Série temporelle 30 dernières minutes |
+| `fraud_by_country()` | Top 10 pays par fraude |
+| `top_merchants()` | Top 8 marchands par GMV |
+| `fraud_alerts_mongo(limit)` | Alertes récentes MongoDB |
+| `redis_stats(customer_ids)` | Vélocité live (mêmes clés que le scorer) |
+| `recent_suspicious()` | 15 dernières transactions à score ≥ 0.6 |
+| `ml_monitoring_latest()` / `ml_monitoring_history(limit)` | Lit `ml_monitoring` (écrite par `ml/monitor.py`) |
+| `fraud_score_by_model_version(limit)` | Distribution des scores, comparaison `rule-based-v1` vs `xgboost-v1` |
+
+Toutes les requêtes SQL sont `@st.cache_data(ttl=3)` — évite de re-requêter à chaque rerun Streamlit interne (widgets, etc.), pas seulement au vrai refresh minuté.
+
+---
+
+## `flink/fraud_scoring_job.py` — Job PyFlink (profil Docker `"flink"`, optionnel)
+
+Équivalent logique de `producers/flink_like_job.py`, sur vrai cluster Flink.
+
+| Fonction/Classe | Rôle |
+|---|---|
+| `FraudScoringFunction.open(runtime_context)` | Init Redis — dans `open()` et pas `__init__` (s'exécute côté TaskManager, pas côté client) |
+| `FraudScoringFunction.map(raw)` | Même 5 règles que `flink_like_job.py`, + write-back Postgres |
+| `FraudAlertFilter.filter(value)` | Filtre `review`/`block` pour le sink `stripe.fraud.alerts` |
+| `main()` | Construit le graphe DataStream (source Kafka → map → 2 sinks) |
+
+---
+
+## `dags/stripe_daily_etl.py` — DAG Airflow (profil Docker `"airflow"`, optionnel)
+
+| Tâche | Commande |
+|---|---|
+| `snowflake_export` | `python /opt/airflow/etl/load_snowflake.py` |
+| `refresh_materialized_views` | `python /opt/airflow/etl/refresh_views.py` |
+
+`snowflake_setup` volontairement absent (bootstrap manuel, cf. `etl/snowflake_setup.py`).
+
+---
+
+## Fichiers non-Python (schéma, config)
+
+| Fichier | Contenu | Lien |
+|---|---|---|
+| `init/postgres/01_ddl.sql` | 6 tables, index, triggers, publication Debezium, vues matérialisées, rôles `replication_user`/`analytics_reader` | [→](../init/postgres/01_ddl.sql) |
+| `init/mongo/01_init_collections.js` | 7 collections, index, TTL RGPD | [→](../init/mongo/01_init_collections.js) |
+| `init/mongo/02_app_user.js` | Utilisateur applicatif Mongo | [→](../init/mongo/02_app_user.js) |
+| `config/debezium-connector.json` | Config connecteur CDC (template) | [→](../config/debezium-connector.json) |
+| `config/debezium-connector-commentaire.md` | Le JSON ci-dessus expliqué ligne par ligne (JSON ne supporte pas les commentaires natifs) | [→](../config/debezium-connector-commentaire.md) |
+| `docker-compose.yml` | 8 services par défaut + profils `flink`/`airflow` | [→](../docker-compose.yml) |
+| `Makefile` | Tous les points d'entrée (`make up`, `make ml-train`, etc.) | [→](../Makefile) |
+
+---
+
+## Diagrammes associés
+
+- [`presentation/stripe_architecture_globale.drawio`](../presentation/stripe_architecture_globale.drawio) — vue d'ensemble services/flux
+- [`presentation/stripe_code_structure.drawio`](../presentation/stripe_code_structure.drawio) — ce document, en version visuelle (fichier → fonctions → imports)
+- [`presentation/stripe_erd_oltp.drawio`](../presentation/stripe_erd_oltp.drawio) — schéma Postgres
+- [`presentation/stripe_mongodb_structure.drawio`](../presentation/stripe_mongodb_structure.drawio) — schéma MongoDB

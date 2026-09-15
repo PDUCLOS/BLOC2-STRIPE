@@ -42,3 +42,4 @@ logs/
 
 # === Fichiers temporaires draw.io ===
 .$*.bkp
+.$*.dtmp

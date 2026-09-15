@@ -312,6 +312,7 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
 | `debezium-connector.json` | JSON config | Template du connecteur Debezium PG (substitué par `deploy_debezium.sh`) | [→](../config/debezium-connector.json) |
+| `debezium-connector-commentaire.md` | Doc | Explication ligne par ligne du JSON ci-dessus — un fichier `.json` ne peut pas contenir de commentaires natifs, ce doc compagnon comble le manque | [→](../config/debezium-connector-commentaire.md) |
 
 ### 3.11 — `tests/` — End-to-end
 
