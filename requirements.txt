@@ -1,0 +1,14 @@
+# Python deps pour le producer + dashboard + scripts (venv local)
+# PyFlink est installé dans l'image Docker Flink (flink/requirements.txt)
+psycopg2-binary==2.9.9
+pymongo==4.6.0
+redis==5.0.1
+kafka-python==2.0.2
+confluent-kafka==2.3.0
+python-dotenv==1.0.0
+streamlit==1.32.0
+pandas==2.1.4
+plotly==5.18.0
+snowflake-connector-python==3.6.0
+pyarrow==14.0.2
+faker==22.0.0

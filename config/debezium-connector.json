@@ -1,0 +1,28 @@
+{
+  "name": "stripe-postgres-cdc",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "replication_user",
+    "database.password": "REPLACE_ME",
+    "database.dbname": "stripe_oltp",
+    "database.server.name": "stripe",
+    "plugin.name": "pgoutput",
+    "publication.name": "stripe_publication",
+    "slot.name": "stripe_debezium_slot",
+    "table.include.list": "public.transactions,public.refunds,public.fraud_indicators",
+    "transforms": "unwrap",
+    "transforms.unwrap.type": "io.debezium.transforms.ExtractNewRecordState",
+    "transforms.unwrap.drop.tombstones": "false",
+    "transforms.unwrap.delete.handling.mode": "rewrite",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "topic.prefix": "stripe",
+    "snapshot.mode": "no_data",
+    "decimal.handling.mode": "double",
+    "time.precision.mode": "connect"
+  }
+}

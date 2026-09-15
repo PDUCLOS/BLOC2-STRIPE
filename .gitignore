@@ -1,0 +1,23 @@
+.env
+.env.local
+.env.*
+!.env.example
+*.log
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+# All Docker volume data (Postgres, Mongo, Redis, Kafka, Debezium, Flink)
+data/
+.idea/
+.vscode/
+.DS_Store
+*.swp
+*.swo
+.idea_modules/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

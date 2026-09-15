@@ -1,0 +1,9 @@
+# Python deps pour PyFlink job (installées dans l'image Flink custom)
+# Note: numpy + apache-flink sont installés séparément dans le Dockerfile
+# (à cause d'un conflit de résolveur de versions pip)
+redis==5.0.1
+async-timeout==4.0.3
+pymongo==4.6.0
+confluent-kafka==2.3.0
+kafka-python==2.0.2
+python-dotenv==1.0.0
