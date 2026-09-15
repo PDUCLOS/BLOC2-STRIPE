@@ -17,7 +17,9 @@ bash scripts/create_topics.sh              # idempotent
 bash scripts/deploy_debezium.sh            # connecteur CDC
 set -a && source .env && set +a
 SCORING_ENGINE=ml nohup .venv/bin/python -u producers/flink_like_job.py > /tmp/scorer.log 2>&1 &
-nohup .venv/bin/python -u producers/mongo_writer.py > /tmp/mongo.log 2>&1 &
+# mongo_writer : venv HORS Google Drive (le .venv streamé par Drive bloque sur `import kafka`)
+python3 -m venv ~/venvs/stripe && ~/venvs/stripe/bin/pip install -q -r requirements.txt
+nohup ~/venvs/stripe/bin/python -u producers/mongo_writer.py > /tmp/mongo.log 2>&1 &
 nohup .venv/bin/python -u producers/transaction_producer.py --rate 5 > /tmp/producer.log 2>&1 &
 ```
 
@@ -37,7 +39,7 @@ http://localhost:5001, Airflow (profil `airflow`) et le dépôt GitHub (onglet A
 | 2 | 0:20 | Terminal | `docker compose ps` | « Neuf services en conteneurs, tous en bonne santé. » |
 | 3 | 0:25 | Terminal | `curl -s localhost:8083/connectors?expand=status \| python3 -m json.tool \| grep state` puis `docker exec stripe-kafka kafka-console-consumer --bootstrap-server localhost:9092 --topic stripe.public.transactions --max-messages 2` | « Debezium lit le journal de PostgreSQL et publie chaque transaction dans Kafka, sans que la base n'appelle personne. » |
 | 4 | 0:30 | Terminal | `tail -3 /tmp/scorer.log` puis `docker exec stripe-postgres psql -U stripe_app -d stripe_oltp -c "SELECT decision, model_version, count(*) FROM fraud_indicators GROUP BY 1,2;"` | « Le scorer calcule le score avec XGBoost, l'écrit dans PostgreSQL et trace chaque blocage dans `fraud_indicators`, dans la même transaction. » |
-| 5 | 0:40 | Dashboard | Login `admin` / `Bloc2-Demo-2026`, onglet Vue d'ensemble puis Performance ML | « L'accès est protégé. On voit les KPIs, les transactions suspectes, puis la dérive et la précision servie mesurées par Evidently. » |
+| 5 | 0:40 | Dashboard | Login `admin` / `Bloc2-Demo-2026`, onglet Vue d'ensemble puis Performance ML | « L'accès est protégé. On voit les KPIs, les transactions suspectes, puis la dérive et la précision servie mesurées par Evidently. » Si le statut affiche ALERT (dérive > 0,3, réentraînement en cooldown), le commenter : c'est le monitoring qui fonctionne. |
 | 6 | 0:20 | MLflow | Expérience `fraud-detector`, dernier run | « Chaque entraînement, manuel ou automatique, est tracé avec ses métriques. » |
 | 7 | 0:30 | Terminal | `make queries-check \| tail -25` | « Les requêtes SQL et MongoDB du livrable s'exécutent sur la stack à chaque push. Ici la précision servie et l'anonymisation RGPD, jouée puis annulée. » |
 | 8 | 0:25 | Terminal | `make test \| tail -8` | « Seize contrôles de bout en bout, tous verts. » |
