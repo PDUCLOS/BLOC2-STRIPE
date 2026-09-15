@@ -165,6 +165,9 @@ jobs:
           echo $! > /tmp/scorer.pid
           sleep 20
 
+      - name: make refresh-views (vues matérialisées créées WITH NO DATA)
+        run: make refresh-views
+
       - name: make test (tests/test_e2e.py)
         run: make test
 

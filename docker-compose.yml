@@ -49,6 +49,12 @@ services:
       MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:-admin}
       MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?must be set in .env}
       MONGO_INITDB_DATABASE: ${MONGO_DB:-stripe_nosql}
+      # Lues par init/mongo/02_app_user.js (process.env) : sans elles, l'utilisateur
+      # applicatif est créé avec le mot de passe par défaut et les clients qui
+      # utilisent MONGO_APP_PASSWORD du .env échouent à s'authentifier.
+      MONGO_DB: ${MONGO_DB:-stripe_nosql}
+      MONGO_APP_USER: ${MONGO_APP_USER:-stripe_app}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?must be set in .env}
     ports:
       - "27017:27017"
     volumes:

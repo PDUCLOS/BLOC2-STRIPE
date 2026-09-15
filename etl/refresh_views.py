@@ -42,7 +42,10 @@ def main():
             # qu'un premier refresh non-concurrent ne l'a pas peuplée.
             try:
                 cur.execute(f"REFRESH MATERIALIZED VIEW CONCURRENTLY {view}")
-            except psycopg2.errors.FeatureNotSupported:
+            # CONCURRENTLY exige une vue déjà peuplée et un index unique : sur une
+            # stack neuve (vue créée WITH NO DATA), Postgres lève
+            # ObjectNotInPrerequisiteState ; on retombe alors sur un REFRESH simple.
+            except (psycopg2.errors.FeatureNotSupported, psycopg2.errors.ObjectNotInPrerequisiteState):
                 # "CONCURRENTLY cannot be used when the materialized view is
                 # not populated" — cas du tout premier refresh après un
                 # WITH NO DATA. Les refreshs suivants utiliseront CONCURRENTLY.
