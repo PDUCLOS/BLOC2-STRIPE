@@ -204,7 +204,7 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 | `ml_features` | — | Features pré-calculées pour ML | (futur) |
 | `customer_feedback` | — | Disputes, contestations | (futur) |
 | `fraud_alerts` | — | Alertes fraude (decision review/block) | `mongo_writer.py` |
-| `logs` | — (TTL via `ttl_expires_at`) | Logs monitoring | `mongo_writer.py` |
+| `logs` | TTL sur `ttl_expires_at` (`expireAfterSeconds: 0`, purge à 90 j), `(service, created_at)` | Logs monitoring | `mongo_writer.py` |
 
 ---
 

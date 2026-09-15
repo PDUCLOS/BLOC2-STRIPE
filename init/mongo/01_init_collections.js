@@ -47,4 +47,13 @@ db.fraud_alerts.createIndex({ customer_id: 1, created_at: -1 });
 db.fraud_alerts.createIndex({ decision: 1, created_at: -1 });
 db.fraud_alerts.createIndex({ created_at: -1 });
 
+// ── logs ──────────────────────────────────────────────────
+// Journal applicatif écrit par producers/mongo_writer.py. Chaque document porte
+// sa date d'expiration (ttl_expires_at = created_at + 90 j) : l'index TTL avec
+// expireAfterSeconds: 0 purge le document à cette date (RGPD). Créée ici pour
+// que l'index existe dès le démarrage, même avant la première écriture.
+db.createCollection("logs");
+db.logs.createIndex({ ttl_expires_at: 1 }, { expireAfterSeconds: 0 });
+db.logs.createIndex({ service: 1, created_at: -1 });
+
 print("[OK] Mongo collections et index créés pour " + (process.env.MONGO_DB || "stripe_nosql"));
