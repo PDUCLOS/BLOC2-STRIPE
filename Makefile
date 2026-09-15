@@ -148,6 +148,10 @@ snowflake-export:
 	@$(PYTHON) etl/load_snowflake.py
 	@echo "[OK] Export batch vers Snowflake terminé"
 
+.PHONY: refresh-views
+refresh-views:
+	@$(PYTHON) etl/refresh_views.py
+
 # ─────────────────────────────────────────────────────────
 # Machine Learning
 # ─────────────────────────────────────────────────────────

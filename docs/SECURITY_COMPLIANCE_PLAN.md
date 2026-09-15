@@ -50,27 +50,29 @@ et le schéma (`init/postgres/01_ddl.sql`) ne prévoient aucun champ pour ces do
 |---|---|---|---|
 | `stripe_app` (superutilisateur du conteneur, cf. `.env`) | `docker-compose.yml` | Lecture/écriture complète | Producer, dashboard, ETL — usage applicatif direct |
 | `replication_user` | [`scripts/postgres_init_roles.sh`](../scripts/postgres_init_roles.sh) + `init/postgres/01_ddl.sql` (bootstrap) | `SELECT` seul, sur toutes les tables + futures tables (`ALTER DEFAULT PRIVILEGES`) | Debezium (CDC) — accès en lecture seule, jamais d'écriture |
+| `analytics_reader` | `init/postgres/01_ddl.sql` (rôle + grants) + `postgres_init_roles.sh` (mot de passe) | `SELECT` sur `merchants`, `customers`, `transactions`, `refunds`, `fraud_indicators` ; sur `payment_methods`, colonnes explicitement listées **sans** `fingerprint` | Dashboard Streamlit ([`dashboard/app.py`](../dashboard/app.py)) — bascule dessus automatiquement si `PG_ANALYTICS_USER`/`PASSWORD` sont renseignés dans `.env`, sinon retombe sur `stripe_app` |
 
-Le principe du moindre privilège est appliqué au moins pour `replication_user` :
-il ne peut techniquement pas modifier de données, seulement les lire via le
-protocole de réplication logique.
+Le principe du moindre privilège est appliqué pour les deux rôles dédiés :
+`replication_user` ne peut techniquement pas modifier de données (lecture
+seule via le protocole de réplication logique), et `analytics_reader` ne
+peut pas lire `payment_methods.fingerprint` — vérifié en base réelle
+(`SELECT *` refusé, colonnes autorisées + autres tables accessibles).
 
-### 3.2 — Écart identifié vs. cible
+### 3.2 — État vérifié
 
-`PRESENTATION.md` mentionne un rôle `analytics_reader` sans accès à
-`fingerprint` — **ce rôle n'existe pas dans le DDL actuel**
-([`init/postgres/01_ddl.sql`](../init/postgres/01_ddl.sql)). En l'état, tout
-accès applicatif passe par `stripe_app`, qui a accès à toutes les colonnes.
-
-**Action recommandée** :
 ```sql
-CREATE ROLE analytics_reader WITH LOGIN PASSWORD '...';
+-- init/postgres/01_ddl.sql
+CREATE ROLE analytics_reader WITH LOGIN;
 GRANT SELECT ON merchants, customers, transactions, refunds, fraud_indicators TO analytics_reader;
-REVOKE SELECT (fingerprint) ON payment_methods FROM analytics_reader;
-GRANT SELECT (pm_id, customer_id, type, brand, last4, is_default) ON payment_methods TO analytics_reader;
+GRANT SELECT (pm_id, customer_id, type, brand, last4, is_default, expires_at, created_at)
+    ON payment_methods TO analytics_reader;
 ```
-À utiliser pour le dashboard Streamlit et Snowflake une fois ce rôle créé,
-au lieu de `stripe_app`.
+
+Le mot de passe est posé séparément par `postgres_init_roles.sh` (même
+raison que pour `replication_user` : ne pas hardcoder de secret dans le SQL
+d'init). Le dashboard lit `PG_ANALYTICS_USER`/`PG_ANALYTICS_PASSWORD` en
+priorité, avec fallback sur `PG_USER`/`PG_PASSWORD` pour ne pas casser une
+installation où ce rôle n'a pas encore été créé.
 
 ### 3.3 — MongoDB / Redis
 
@@ -185,7 +187,7 @@ hors périmètre de ce document.
 | Droit à l'effacement (Art. 17) | ✅ Fait |
 | TTL / limitation de conservation | ✅ Fait |
 | Rôle `replication_user` restreint (lecture seule) | ✅ Fait |
-| Rôle `analytics_reader` sans accès `fingerprint` | ❌ Documenté mais pas implémenté (§3.2) |
+| Rôle `analytics_reader` sans accès `fingerprint` | ✅ Fait — vérifié en base réelle (§3.2) |
 | TLS sur les connexions inter-services | ❌ Désactivé en démo, activable en prod (§4) |
 | Alerting actif (PagerDuty/Slack) | ❌ Non implémenté (§7.2) |
 | Audit trail des accès DB | ❌ Non implémenté (§7.2) |

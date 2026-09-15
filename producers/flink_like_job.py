@@ -251,16 +251,30 @@ def main():
     # Note: c'est le même Debezium qui capte cet UPDATE et le re-pousse dans Kafka,
     # créant un cycle maîtrisé via le consumer group "flink-fraud-scorer" qui ignore
     # ses propres messages (auto.offset.reset=earliest au 1er démarrage seulement).
-    pg_conn = None
-    try:
-        pg_conn = psycopg2.connect(
-            host=PG_HOST, port=PG_PORT, dbname=PG_DB,
-            user=PG_USER, password=PG_PASSWORD,
-            connect_timeout=5,
-        )
-        print(f"[OK] PostgreSQL connected (for fraud_score write-back)")
-    except psycopg2.OperationalError as e:
-        print(f"[WARN] PostgreSQL not reachable ({e}), fraud_score write-back disabled")
+    def connect_pg():
+        """Ouvre une connexion Postgres pour le write-back, ou None si indisponible.
+
+        connect_timeout court : en cas de Postgres down, on ne veut pas
+        bloquer la boucle de scoring en attendant une connexion qui échouera.
+        """
+        try:
+            conn = psycopg2.connect(
+                host=PG_HOST, port=PG_PORT, dbname=PG_DB,
+                user=PG_USER, password=PG_PASSWORD,
+                connect_timeout=3,
+            )
+            print(f"[OK] PostgreSQL connected (for fraud_score write-back)")
+            return conn
+        except psycopg2.OperationalError as e:
+            print(f"[WARN] PostgreSQL not reachable ({e}), fraud_score write-back disabled")
+            return None
+
+    pg_conn = connect_pg()
+    # Reconnexion throttlée : au minimum PG_RECONNECT_INTERVAL_SECONDS entre
+    # deux tentatives, pour ne pas retenter une connexion à chaque transaction
+    # (des centaines/s) tant que Postgres reste down.
+    PG_RECONNECT_INTERVAL_SECONDS = 10
+    last_pg_reconnect_attempt = time.time()
 
     count = 0
     alert_count = 0
@@ -330,6 +344,12 @@ def main():
 
         producer.poll(0)  # trigger delivery callbacks
         count += 1
+
+        # Reconnexion si la connexion précédente est morte (throttlée pour ne
+        # pas retenter à chaque message tant que Postgres est down).
+        if pg_conn is None and time.time() - last_pg_reconnect_attempt >= PG_RECONNECT_INTERVAL_SECONDS:
+            last_pg_reconnect_attempt = time.time()
+            pg_conn = connect_pg()
 
         # Write-back fraud_score dans Postgres (optionnel, mais ferme la boucle)
         # et aligne le dashboard OLTP avec la décision temps réel.

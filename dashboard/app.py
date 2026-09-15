@@ -145,6 +145,7 @@ def pg_query(sql, params=None):
     except Exception:
         return pd.DataFrame()
 
+@st.cache_data(ttl=3)
 def kpis_from_pg():
     """Récupère les KPIs globaux depuis PostgreSQL.
     
@@ -189,6 +190,7 @@ def kpis_from_pg():
         "failed": int(row["failed"] or 0),
     }
 
+@st.cache_data(ttl=3)
 def txn_over_time():
     """Récupère l'évolution des transactions et fraudes sur les 30 dernières minutes.
     
@@ -216,6 +218,7 @@ def txn_over_time():
         GROUP BY 1 ORDER BY 1
     """, (FRAUD_THRESHOLD,))
 
+@st.cache_data(ttl=3)
 def fraud_by_country():
     """Récupère le top 10 des pays avec le plus de fraudes détectées.
     
@@ -233,6 +236,7 @@ def fraud_by_country():
         GROUP BY ip_country ORDER BY fraud_count DESC LIMIT 10
     """, (FRAUD_THRESHOLD,))
 
+@st.cache_data(ttl=3)
 def top_merchants():
     """Récupère le top 8 des marchands par volume d'affaires (GMV).
     
@@ -306,6 +310,7 @@ def redis_stats(customer_ids):
             pass
     return out
 
+@st.cache_data(ttl=3)
 def recent_suspicious():
     """Récupère les 15 dernières transactions suspectes (score >= 0.6) depuis PostgreSQL.
     
@@ -383,7 +388,10 @@ def fraud_score_by_model_version(limit=300):
 
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.image("https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg", width=120)
+    # Texte stylé plutôt qu'un logo chargé depuis une URL externe : la démo
+    # ne doit pas dépendre du réseau pendant la soutenance (et évite de
+    # embarquer un asset de marque tiers dans le repo).
+    st.markdown('<div style="font-size:1.8rem;font-weight:700;color:#635BFF;">Stripe</div>', unsafe_allow_html=True)
     st.title("Stripe Polyglot")
     st.caption("Certification AIA RNCP41993 — Bloc 2")
     st.divider()

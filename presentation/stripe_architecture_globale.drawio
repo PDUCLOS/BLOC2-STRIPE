@@ -1,56 +1,239 @@
-<mxfile host="app.diagrams.net" agent="claude-code" version="24.0.0">
+<mxfile host="Electron" agent="claude-code">
   <diagram name="Architecture réelle" id="stripe-arch-real">
-    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1100" math="0" shadow="0">
+    <mxGraphModel dx="5273" dy="1807" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1700" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="c3" value="Stripe Polyglot — Architecture de données unifiée (implémentation réelle)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;fontSize=20;align=center;verticalAlign=middle;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="40" y="10" width="1580" height="40" as="geometry" /></mxCell><mxCell id="c4" value="transaction_producer.py
-(95% legit / 5% fraude)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;verticalAlign=middle;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="40" y="70" width="220" height="60" as="geometry" /></mxCell><mxCell id="c5" value="OLTP — PostgreSQL 16 (3NF, ACID)" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="160" width="480" height="360" as="geometry" /></mxCell><mxCell id="c6" value="merchants
-(UUID, name, tier)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c5"><mxGeometry x="20" y="44" width="200" height="40" as="geometry" /></mxCell><mxCell id="c7" value="customers
-(UUID, email, segment)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c5"><mxGeometry x="240" y="44" width="220" height="40" as="geometry" /></mxCell><mxCell id="c8" value="transactions ★
-(amount BIGINT, fraud_score, idempotency_key UNIQUE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b9e0a5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" vertex="1" parent="c5"><mxGeometry x="20" y="92" width="440" height="50" as="geometry" /></mxCell><mxCell id="c9" value="payment_methods
-(fingerprint SHA-256, last4)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c5"><mxGeometry x="20" y="150" width="210" height="40" as="geometry" /></mxCell><mxCell id="c10" value="refunds / fraud_indicators" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c5"><mxGeometry x="250" y="150" width="210" height="40" as="geometry" /></mxCell><mxCell id="c11" value="mv_daily_revenue, mv_merchant_stats (vues matérialisées)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c5"><mxGeometry x="20" y="198" width="440" height="40" as="geometry" /></mxCell><mxCell id="c12" value="Rôles : stripe_app (RW complet) · replication_user (SELECT seul,
-pour Debezium) · analytics_reader (SELECT restreint, sans fingerprint)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c5"><mxGeometry x="20" y="246" width="440" height="66" as="geometry" /></mxCell><mxCell id="c13" value="Kafka (KRaft) + Debezium CDC 2.6" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="560" y="160" width="460" height="300" as="geometry" /></mxCell><mxCell id="c14" value="stripe.public.transactions (CDC, ExtractNewRecordState)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c13"><mxGeometry x="20" y="44" width="420" height="34" as="geometry" /></mxCell><mxCell id="c15" value="stripe.payments.events
-(12 partitions)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c13"><mxGeometry x="20" y="86" width="200" height="34" as="geometry" /></mxCell><mxCell id="c16" value="stripe.fraud.alerts
-(3 partitions)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c13"><mxGeometry x="240" y="86" width="200" height="34" as="geometry" /></mxCell><mxCell id="c17" value="stripe.etl.dead-letter (rétention infinie)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c13"><mxGeometry x="20" y="128" width="420" height="34" as="geometry" /></mxCell><mxCell id="c18" value="Double listener : kafka:9092 (interne conteneurs) /
-localhost:29092 (host)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c13"><mxGeometry x="20" y="172" width="420" height="46" as="geometry" /></mxCell><mxCell id="c19" value="wal_level=logical · slot pgoutput · publication ciblée (3 tables)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c13"><mxGeometry x="20" y="222" width="420" height="40" as="geometry" /></mxCell><mxCell id="c20" value="Scoring temps réel — flink_like_job.py" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="560" y="500" width="460" height="260" as="geometry" /></mxCell><mxCell id="c21" value="SCORING_ENGINE=rules (5 règles statiques)
-ou SCORING_ENGINE=ml (XGBoost, fallback auto si absent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" vertex="1" parent="c20"><mxGeometry x="20" y="44" width="420" height="50" as="geometry" /></mxCell><mxCell id="c22" value="Redis 7 — feature store online
-v1h_&lt;id&gt; / v24h_&lt;id&gt; (ZSET)
-feat_&lt;id&gt; (HASH)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c20"><mxGeometry x="20" y="104" width="200" height="60" as="geometry" /></mxCell><mxCell id="c23" value="Write-back fraud_score
-→ Postgres (WHERE fraud_score
-IS NULL, idempotent)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c20"><mxGeometry x="240" y="104" width="200" height="60" as="geometry" /></mxCell><mxCell id="c24" value="PyFlink 1.18 (fraud_scoring_job.py) — job prod équivalent,
-profil Docker optionnel &quot;flink&quot; (build ARM64 cassé en démo)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c20"><mxGeometry x="20" y="172" width="420" height="66" as="geometry" /></mxCell><mxCell id="c25" value="Pipeline ML — Entraînement, tracking, monitoring" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="1080" y="500" width="480" height="300" as="geometry" /></mxCell><mxCell id="c26" value="ml/train_fraud_model.py
-XGBoost, label = vérité
-terrain du générateur" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c25"><mxGeometry x="20" y="44" width="200" height="56" as="geometry" /></mxCell><mxCell id="c27" value="MLflow (:5001)
-Tracking runs +
-Model Registry" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" vertex="1" parent="c25"><mxGeometry x="240" y="44" width="200" height="56" as="geometry" /></mxCell><mxCell id="c28" value="ml-monitor (ml/monitor.py)
-Evidently : drift + precision/
-recall RÉELLEMENT servis (Mongo)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c25"><mxGeometry x="20" y="112" width="200" height="66" as="geometry" /></mxCell><mxCell id="c29" value="Réentraînement automatique
-si drift&gt;0.3 OU recall&lt;0.7
-OU precision&lt;0.5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c25"><mxGeometry x="240" y="112" width="200" height="66" as="geometry" /></mxCell><mxCell id="c30" value="ml/features.py — vecteur partagé entraînement ↔ inférence (amount_log, hour, dow, geo risk, device, velocity 1h/24h)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c25"><mxGeometry x="20" y="190" width="440" height="40" as="geometry" /></mxCell><mxCell id="c31" value="Limite assumée : scorer cache le modèle en mémoire, pas de hot-reload (redémarrage requis après retrain)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c25"><mxGeometry x="20" y="234" width="440" height="40" as="geometry" /></mxCell><mxCell id="c32" value="MongoDB 7 — NoSQL (schéma flexible)" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="1080" y="160" width="480" height="300" as="geometry" /></mxCell><mxCell id="c33" value="transaction_logs
-(TTL 90j RGPD)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c32"><mxGeometry x="20" y="44" width="200" height="40" as="geometry" /></mxCell><mxCell id="c34" value="fraud_alerts
-(txn_id, model_version)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c32"><mxGeometry x="240" y="44" width="200" height="40" as="geometry" /></mxCell><mxCell id="c35" value="ml_features ★ (feature store offline, upsert par customer_id — alimentée en continu)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0a9a5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" vertex="1" parent="c32"><mxGeometry x="20" y="92" width="440" height="42" as="geometry" /></mxCell><mxCell id="c36" value="ml_monitoring
-(historique drift/perf)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c32"><mxGeometry x="20" y="142" width="200" height="40" as="geometry" /></mxCell><mxCell id="c37" value="logs, user_interactions,
-customer_feedback" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c32"><mxGeometry x="240" y="142" width="200" height="40" as="geometry" /></mxCell><mxCell id="c38" value="mongo_writer.py : consumer Kafka → Mongo, DLQ si échec d'écriture" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c32"><mxGeometry x="20" y="190" width="440" height="40" as="geometry" /></mxCell><mxCell id="c39" value="OLAP — Snowflake (Star Schema)" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#cfe2f3;strokeColor=#6fa8dc;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="560" width="480" height="260" as="geometry" /></mxCell><mxCell id="c40" value="fact_transactions ★ (CLUSTER BY date_key, merchant_key)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" vertex="1" parent="c39"><mxGeometry x="20" y="44" width="440" height="40" as="geometry" /></mxCell><mxCell id="c41" value="dim_date" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c39"><mxGeometry x="20" y="92" width="140" height="40" as="geometry" /></mxCell><mxCell id="c42" value="dim_merchant" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c39"><mxGeometry x="170" y="92" width="140" height="40" as="geometry" /></mxCell><mxCell id="c43" value="dim_customer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c39"><mxGeometry x="320" y="92" width="140" height="40" as="geometry" /></mxCell><mxCell id="c44" value="dim_payment_method" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c39"><mxGeometry x="20" y="140" width="210" height="40" as="geometry" /></mxCell><mxCell id="c45" value="dim_geography (is_high_risk)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c39"><mxGeometry x="250" y="140" width="210" height="40" as="geometry" /></mxCell><mxCell id="c46" value="etl/load_snowflake.py — MERGE upsert, dry-run gracieux sans credentials" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6fa8dc;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c39"><mxGeometry x="20" y="188" width="440" height="44" as="geometry" /></mxCell><mxCell id="c47" value="Airflow 2.9 (profil Docker &quot;airflow&quot;, standalone)" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="40" y="850" width="480" height="130" as="geometry" /></mxCell><mxCell id="c48" value="DAG stripe_daily_etl — snowflake_export, 02:00 UTC quotidien" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c47"><mxGeometry x="20" y="44" width="440" height="36" as="geometry" /></mxCell><mxCell id="c49" value="snowflake_setup = bootstrap manuel, volontairement hors DAG quotidien" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c47"><mxGeometry x="20" y="84" width="440" height="30" as="geometry" /></mxCell><mxCell id="c50" value="Dashboard Streamlit (:8501)" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="560" y="850" width="460" height="130" as="geometry" /></mxCell><mxCell id="c51" value="Onglet &quot;Vue d'ensemble&quot;
-KPIs, charts temps réel,
-alertes, transactions suspectes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c50"><mxGeometry x="20" y="44" width="200" height="66" as="geometry" /></mxCell><mxCell id="c52" value="Onglet &quot;Performance ML&quot;
-drift, recall, precision,
-distribution par model_version" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c50"><mxGeometry x="240" y="44" width="200" height="66" as="geometry" /></mxCell><mxCell id="c53" value="Sécurité &amp; conformité" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f0f0f0;strokeColor=#999999;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" vertex="1" parent="1"><mxGeometry x="1080" y="850" width="480" height="200" as="geometry" /></mxCell><mxCell id="c54" value="PCI-DSS v4.0
-Pas de PAN stocké,
-fingerprint SHA-256" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c53"><mxGeometry x="20" y="44" width="210" height="46" as="geometry" /></mxCell><mxCell id="c55" value="RGPD
-TTL Mongo, anonymize_
-customer() PL/pgSQL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c53"><mxGeometry x="240" y="44" width="210" height="46" as="geometry" /></mxCell><mxCell id="c56" value="analytics_reader
-lecture seule, sans
-fingerprint (vérifié en base)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" vertex="1" parent="c53"><mxGeometry x="20" y="100" width="210" height="46" as="geometry" /></mxCell><mxCell id="c57" value="TLS désactivé en démo
-(activable, cf. PGSSLMODE)
-— assumé, pas un oubli" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" vertex="1" parent="c53"><mxGeometry x="240" y="100" width="210" height="46" as="geometry" /></mxCell><mxCell id="c58" value="INSERT" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#666666;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#666666;" edge="1" parent="1" source="c4" target="c5"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c59" value="CDC (WAL logique)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;" edge="1" parent="1" source="c5" target="c13"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c60" value="consume" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d6b656;" edge="1" parent="1" source="c13" target="c20"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c61" value="sink (payments.events,
-fraud.alerts)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9673a6;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#9673a6;dashed=1;" edge="1" parent="1" source="c20" target="c13"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c62" value="consume
-(mongo_writer.py)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d6b656;" edge="1" parent="1" source="c13" target="c32"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c63" value="ml/models/*.pkl
-(chargé au démarrage)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;dashed=1;" edge="1" parent="1" source="c25" target="c20"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c64" value="extract_training_data()
-+ extract_current_window()" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;dashed=1;" edge="1" parent="1" source="c5" target="c25"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c65" value="compute_served_performance()
-(precision/recall réels)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#b85450;dashed=1;" edge="1" parent="1" source="c32" target="c25"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c66" value="ml_monitoring" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;" edge="1" parent="1" source="c25" target="c32"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c67" value="extract quotidien" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;" edge="1" parent="1" source="c5" target="c47"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c68" value="MERGE (dry-run si
-pas de credentials)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d79b00;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d79b00;" edge="1" parent="1" source="c47" target="c39"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c69" value="onglet Vue d'ensemble" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#b85450;" edge="1" parent="1" source="c32" target="c50"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c70" value="onglet Performance ML" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;" edge="1" parent="1" source="c25" target="c50"><mxGeometry relative="1" as="geometry" /></mxCell><mxCell id="c71" value="analytics_reader
-(lecture seule)" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;" edge="1" parent="1" source="c5" target="c50"><mxGeometry relative="1" as="geometry" /></mxCell>
+        <mxCell id="c3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=none;fontSize=20;align=center;verticalAlign=middle;fontStyle=1;" value="Stripe Polyglot — Architecture de données unifiée (implémentation réelle)" vertex="1">
+          <mxGeometry height="40" width="1580" x="40" y="10" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=center;verticalAlign=middle;fontStyle=1;" value="transaction_producer.py (95% legit / 5% fraude)" vertex="1">
+          <mxGeometry height="60" width="220" x="40" y="70" as="geometry" />
+        </mxCell>
+        <mxCell id="c5" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="OLTP — PostgreSQL 16 (3NF, ACID)" vertex="1">
+          <mxGeometry height="360" width="480" x="40" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c6" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="merchants (UUID, name, tier)" vertex="1">
+          <mxGeometry height="40" width="200" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c7" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="customers (UUID, email, segment)" vertex="1">
+          <mxGeometry height="40" width="220" x="240" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c8" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b9e0a5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" value="transactions ★ (amount BIGINT, fraud_score, idempotency_key UNIQUE)" vertex="1">
+          <mxGeometry height="50" width="440" x="20" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="c9" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="payment_methods (fingerprint SHA-256, last4)" vertex="1">
+          <mxGeometry height="40" width="210" x="20" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="c10" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="refunds / fraud_indicators" vertex="1">
+          <mxGeometry height="40" width="210" x="250" y="150" as="geometry" />
+        </mxCell>
+        <mxCell id="c11" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e2;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="mv_daily_revenue, mv_merchant_stats (vues matérialisées)" vertex="1">
+          <mxGeometry height="40" width="440" x="20" y="198" as="geometry" />
+        </mxCell>
+        <mxCell id="c12" parent="c5" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="Rôles : stripe_app (RW complet) · replication_user (SELECT seul, pour Debezium) · analytics_reader (SELECT restreint, sans fingerprint)" vertex="1">
+          <mxGeometry height="66" width="440" x="20" y="246" as="geometry" />
+        </mxCell>
+        <mxCell id="c13" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Kafka (KRaft) + Debezium CDC 2.6" vertex="1">
+          <mxGeometry height="300" width="460" x="560" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c14" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="stripe.public.transactions (CDC, ExtractNewRecordState)" vertex="1">
+          <mxGeometry height="34" width="420" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c15" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="stripe.payments.events (12 partitions)" vertex="1">
+          <mxGeometry height="34" width="200" x="20" y="86" as="geometry" />
+        </mxCell>
+        <mxCell id="c16" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="stripe.fraud.alerts (3 partitions)" vertex="1">
+          <mxGeometry height="34" width="200" x="240" y="86" as="geometry" />
+        </mxCell>
+        <mxCell id="c17" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff9e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="stripe.etl.dead-letter (rétention infinie)" vertex="1">
+          <mxGeometry height="34" width="420" x="20" y="128" as="geometry" />
+        </mxCell>
+        <mxCell id="c18" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="Double listener : kafka:9092 (interne conteneurs) / localhost:29092 (host)" vertex="1">
+          <mxGeometry height="46" width="420" x="20" y="172" as="geometry" />
+        </mxCell>
+        <mxCell id="c19" parent="c13" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="wal_level=logical · slot pgoutput · publication ciblée (3 tables)" vertex="1">
+          <mxGeometry height="40" width="420" x="20" y="222" as="geometry" />
+        </mxCell>
+        <mxCell id="c20" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Scoring temps réel — flink_like_job.py" vertex="1">
+          <mxGeometry height="260" width="460" x="560" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="c21" parent="c20" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" value="SCORING_ENGINE=rules (5 règles statiques) ou SCORING_ENGINE=ml (XGBoost, fallback auto si absent)" vertex="1">
+          <mxGeometry height="50" width="420" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c22" parent="c20" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="Redis 7 — feature store online v1h_&lt;id&gt; / v24h_&lt;id&gt; (ZSET) feat_&lt;id&gt; (HASH)" vertex="1">
+          <mxGeometry height="60" width="200" x="20" y="104" as="geometry" />
+        </mxCell>
+        <mxCell id="c23" parent="c20" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f3ecf7;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="Write-back fraud_score → Postgres (WHERE fraud_score IS NULL, idempotent)" vertex="1">
+          <mxGeometry height="60" width="200" x="240" y="104" as="geometry" />
+        </mxCell>
+        <mxCell id="c24" parent="c20" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#9673a6;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="PyFlink 1.18 (fraud_scoring_job.py) — job prod équivalent, profil Docker optionnel &quot;flink&quot; (build ARM64 cassé en démo)" vertex="1">
+          <mxGeometry height="66" width="420" x="20" y="172" as="geometry" />
+        </mxCell>
+        <mxCell id="c25" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Pipeline ML — Entraînement, tracking, monitoring" vertex="1">
+          <mxGeometry height="300" width="480" x="1080" y="500" as="geometry" />
+        </mxCell>
+        <mxCell id="c26" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="ml/train_fraud_model.py XGBoost, label = vérité terrain du générateur" vertex="1">
+          <mxGeometry height="56" width="200" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c27" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" value="MLflow (:5001) Tracking runs + Model Registry" vertex="1">
+          <mxGeometry height="56" width="200" x="240" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c28" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="ml-monitor (ml/monitor.py) Evidently : drift + precision/ recall RÉELLEMENT servis (Mongo)" vertex="1">
+          <mxGeometry height="66" width="200" x="20" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="c29" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf1fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="Réentraînement automatique si drift&gt;0.3 OU recall&lt;0.7 OU precision&lt;0.5" vertex="1">
+          <mxGeometry height="66" width="200" x="240" y="112" as="geometry" />
+        </mxCell>
+        <mxCell id="c30" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="ml/features.py — vecteur partagé entraînement ↔ inférence (amount_log, hour, dow, geo risk, device, velocity 1h/24h)" vertex="1">
+          <mxGeometry height="40" width="440" x="20" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="c31" parent="c25" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="Limite assumée : scorer cache le modèle en mémoire, pas de hot-reload (redémarrage requis après retrain)" vertex="1">
+          <mxGeometry height="40" width="440" x="20" y="234" as="geometry" />
+        </mxCell>
+        <mxCell id="c32" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="MongoDB 7 — NoSQL (schéma flexible)" vertex="1">
+          <mxGeometry height="300" width="480" x="1080" y="160" as="geometry" />
+        </mxCell>
+        <mxCell id="c33" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="transaction_logs (TTL 90j RGPD)" vertex="1">
+          <mxGeometry height="40" width="200" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c34" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="fraud_alerts (txn_id, model_version)" vertex="1">
+          <mxGeometry height="40" width="200" x="240" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c35" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f0a9a5;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" value="ml_features ★ (feature store offline, upsert par customer_id — alimentée en continu)" vertex="1">
+          <mxGeometry height="42" width="440" x="20" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="c36" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="ml_monitoring (historique drift/perf)" vertex="1">
+          <mxGeometry height="40" width="200" x="20" y="142" as="geometry" />
+        </mxCell>
+        <mxCell id="c37" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fbe0df;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="logs, user_interactions, customer_feedback" vertex="1">
+          <mxGeometry height="40" width="200" x="240" y="142" as="geometry" />
+        </mxCell>
+        <mxCell id="c38" parent="c32" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#b85450;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="mongo_writer.py : consumer Kafka → Mongo, DLQ si échec d&#39;écriture" vertex="1">
+          <mxGeometry height="40" width="440" x="20" y="190" as="geometry" />
+        </mxCell>
+        <mxCell id="c39" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#cfe2f3;strokeColor=#6fa8dc;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="OLAP — Snowflake (Star Schema)" vertex="1">
+          <mxGeometry height="260" width="480" x="40" y="560" as="geometry" />
+        </mxCell>
+        <mxCell id="c40" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;fontStyle=1;" value="fact_transactions ★ (CLUSTER BY date_key, merchant_key)" vertex="1">
+          <mxGeometry height="40" width="440" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c41" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="dim_date" vertex="1">
+          <mxGeometry height="40" width="140" x="20" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="c42" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="dim_merchant" vertex="1">
+          <mxGeometry height="40" width="140" x="170" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="c43" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="dim_customer" vertex="1">
+          <mxGeometry height="40" width="140" x="320" y="92" as="geometry" />
+        </mxCell>
+        <mxCell id="c44" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="dim_payment_method" vertex="1">
+          <mxGeometry height="40" width="210" x="20" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c45" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e3f0fb;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="dim_geography (is_high_risk)" vertex="1">
+          <mxGeometry height="40" width="210" x="250" y="140" as="geometry" />
+        </mxCell>
+        <mxCell id="c46" parent="c39" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6fa8dc;fontSize=10;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="etl/load_snowflake.py — MERGE upsert, dry-run gracieux sans credentials" vertex="1">
+          <mxGeometry height="44" width="440" x="20" y="188" as="geometry" />
+        </mxCell>
+        <mxCell id="c47" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Airflow 2.9 (profil Docker &quot;airflow&quot;, standalone)" vertex="1">
+          <mxGeometry height="130" width="480" x="40" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="c48" parent="c47" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff1e0;strokeColor=#666666;fontSize=11;align=center;verticalAlign=middle;spacing=4;" value="DAG stripe_daily_etl — snowflake_export, 02:00 UTC quotidien" vertex="1">
+          <mxGeometry height="36" width="440" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c49" parent="c47" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="snowflake_setup = bootstrap manuel, volontairement hors DAG quotidien" vertex="1">
+          <mxGeometry height="30" width="440" x="20" y="84" as="geometry" />
+        </mxCell>
+        <mxCell id="c50" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Dashboard Streamlit (:8501)" vertex="1">
+          <mxGeometry height="130" width="460" x="560" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="c51" parent="c50" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="Onglet &quot;Vue d&#39;ensemble&quot; KPIs, charts temps réel, alertes, transactions suspectes" vertex="1">
+          <mxGeometry height="66" width="200" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c52" parent="c50" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="Onglet &quot;Performance ML&quot; drift, recall, precision, distribution par model_version" vertex="1">
+          <mxGeometry height="66" width="200" x="240" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c53" parent="1" style="swimlane;rounded=0;whiteSpace=wrap;html=1;startSize=32;fillColor=#f0f0f0;strokeColor=#999999;fontSize=14;fontStyle=1;fontColor=#000000;verticalAlign=top;align=center;" value="Sécurité &amp; conformité" vertex="1">
+          <mxGeometry height="200" width="480" x="1080" y="850" as="geometry" />
+        </mxCell>
+        <mxCell id="c54" parent="c53" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="PCI-DSS v4.0 Pas de PAN stocké, fingerprint SHA-256" vertex="1">
+          <mxGeometry height="46" width="210" x="20" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c55" parent="c53" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="RGPD TTL Mongo, anonymize_ customer() PL/pgSQL" vertex="1">
+          <mxGeometry height="46" width="210" x="240" y="44" as="geometry" />
+        </mxCell>
+        <mxCell id="c56" parent="c53" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=10;align=center;verticalAlign=middle;spacing=4;" value="analytics_reader lecture seule, sans fingerprint (vérifié en base)" vertex="1">
+          <mxGeometry height="46" width="210" x="20" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c57" parent="c53" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;align=center;verticalAlign=middle;spacing=4;fontStyle=2;" value="TLS désactivé en démo (activable, cf. PGSSLMODE) — assumé, pas un oubli" vertex="1">
+          <mxGeometry height="46" width="210" x="240" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c58" edge="1" parent="1" source="c4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#666666;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#666666;" target="c5" value="INSERT">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c59" edge="1" parent="1" source="c5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;" target="c13" value="CDC (WAL logique)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c60" edge="1" parent="1" source="c13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d6b656;" target="c20" value="consume">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c61" edge="1" parent="1" source="c20" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#9673a6;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#9673a6;dashed=1;" target="c13" value="sink (payments.events, fraud.alerts)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c62" edge="1" parent="1" source="c13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d6b656;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d6b656;" target="c32" value="consume (mongo_writer.py)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c63" edge="1" parent="1" source="c25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;dashed=1;" target="c20" value="ml/models/*.pkl (chargé au démarrage)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c64" edge="1" parent="1" source="c5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;dashed=1;exitX=0.848;exitY=0.006;exitDx=0;exitDy=0;exitPerimeter=0;" target="c25" value="extract_training_data() + extract_current_window()">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="447" y="120" />
+              <mxPoint x="1580" y="120" />
+              <mxPoint x="1580" y="650" />
+            </Array>
+            <mxPoint x="450" y="150" as="sourcePoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="c65" edge="1" parent="1" source="c32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#b85450;dashed=1;" target="c25" value="compute_served_performance() (precision/recall réels)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c66" edge="1" parent="1" source="c25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;" target="c32" value="ml_monitoring">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c67" edge="1" parent="1" source="c5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;exitX=0;exitY=0.75;exitDx=0;exitDy=0;entryX=0.002;entryY=0.154;entryDx=0;entryDy=0;entryPerimeter=0;" target="c47" value="extract quotidien">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="30" y="870" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="c68" edge="1" parent="1" source="c47" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#d79b00;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#d79b00;" target="c39" value="MERGE (dry-run si pas de credentials)">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="c69" edge="1" parent="1" source="c32" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#b85450;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#b85450;" target="c50" value="onglet Vue d&#39;ensemble">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1040" y="310" />
+              <mxPoint x="1040" y="915" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="c70" edge="1" parent="1" source="c25" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#6c8ebf;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#6c8ebf;" target="c50" value="onglet Performance ML">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="810" y="770" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="c71" edge="1" parent="1" source="c5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;strokeColor=#82b366;strokeWidth=2;endArrow=block;fontSize=10;fontColor=#82b366;" target="c50" value="analytics_reader (lecture seule)">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="540" y="390" />
+              <mxPoint x="540" y="915" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
       </root>
     </mxGraphModel>
   </diagram>

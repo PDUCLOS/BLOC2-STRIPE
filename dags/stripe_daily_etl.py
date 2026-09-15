@@ -46,3 +46,14 @@ with DAG(
         task_id="snowflake_export",
         bash_command="python /opt/airflow/etl/load_snowflake.py",
     )
+
+    # Les vues mv_daily_revenue / mv_merchant_stats sont créées WITH NO DATA
+    # (cf. init/postgres/01_ddl.sql) — rien ne les peuple sans ce refresh
+    # explicite. Indépendant de l'export Snowflake (source Postgres, pas
+    # Snowflake) mais regroupé dans le même DAG quotidien par simplicité.
+    refresh_views = BashOperator(
+        task_id="refresh_materialized_views",
+        bash_command="python /opt/airflow/etl/refresh_views.py",
+    )
+
+    export_transactions >> refresh_views

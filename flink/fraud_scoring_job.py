@@ -80,7 +80,9 @@ class FraudScoringFunction(MapFunction):
             self.redis_client.zadd(v_key_1h,  {str(now_ts): now_ts})
             self.redis_client.zadd(v_key_24h, {str(now_ts): now_ts})
             self.redis_client.expire(v_key_1h, 3700)
-            self.redis_client.expire(v_key_24h, 87000)
+            # 86500 = 86400 (24h) + marge de 100s, alignée sur producers/flink_like_job.py
+            # (les deux implémentations doivent expirer selon la même règle).
+            self.redis_client.expire(v_key_24h, 86500)
             velocity_1h  = self.redis_client.zcount(v_key_1h,  now_ts - 3600,  "+inf")
             velocity_24h = self.redis_client.zcount(v_key_24h, now_ts - 86400, "+inf")
 

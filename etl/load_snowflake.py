@@ -59,11 +59,18 @@ def extract_from_pg(target_date: date):
                 -- Dénormalise le type/marque du moyen de paiement directement dans
                 -- l'extraction : évite un JOIN côté Snowflake au moment du reporting.
                 pm.type AS pm_type,
-                pm.brand AS pm_brand
+                pm.brand AS pm_brand,
+                -- Attributs marchand nécessaires à upsert_dimensions() (dim_merchant) —
+                -- extraits ici plutôt que re-requêtés côté Snowflake, même logique
+                -- de dénormalisation que pour le moyen de paiement ci-dessus.
+                m.country_code AS merchant_country_code,
+                m.tier AS merchant_tier,
+                m.status AS merchant_status
             FROM transactions t
             -- LEFT JOIN (pas INNER) : pm_id peut être NULL (moyen de paiement supprimé
             -- ou transaction sans pm associé) sans que la transaction disparaisse de l'export.
             LEFT JOIN payment_methods pm ON pm.pm_id = t.pm_id
+            JOIN merchants m ON m.merchant_id = t.merchant_id
             -- Fenêtre = une journée calendaire complète (le job est pensé pour tourner
             -- une fois par jour, cf. Airflow 02:00 UTC dans PRESENTATION.md).
             WHERE DATE(t.created_at) = %s
@@ -78,31 +85,33 @@ def extract_from_pg(target_date: date):
 
 
 def upsert_dimensions(sf_cur, rows):
-    """Upsert (Merge/Insert) des dimensions depuis les données de transaction.
-    
-    Cette fonction met à jour ou insère les enregistrements dans les tables de dimensions
-    (merchants, customers, payment_methods) pour garantir que les clés étrangères de la
-    table de faits seront valides.
-    
+    """Insère les nouvelles dimensions référencées par ce batch de transactions.
+
+    Nécessaire AVANT le MERGE de fact_transactions : les sous-requêtes
+    `(SELECT merchant_key FROM dim_merchant WHERE merchant_id = ...)` de
+    load_to_snowflake() renvoient NULL si la ligne dimension n'existe pas
+    encore — sans cet appel, merchant_key/customer_key/pm_key seraient NULL
+    sur tous les faits chargés.
+
     Args:
         sf_cur: Curseur Snowflake.
-        rows (list[dict]): Liste des transactions contenant les informations des dimensions.
+        rows (list[dict]): Batch de transactions (sortie de extract_from_pg()).
     """
-    # dim_merchant — MERGE depuis PostgreSQL direct
-    sf_cur.execute("""
-        MERGE INTO dim_merchant tgt
-        USING (
-            SELECT DISTINCT
-                merchant_id,
-                country_code,
-                tier,
-                status
-            FROM VALUES %s AS v(merchant_id, country_code, tier, status)
-        ) src ON tgt.merchant_id = src.merchant_id
-        WHEN NOT MATCHED THEN
-            INSERT (merchant_id, country_code, tier, status)
-            VALUES (src.merchant_id, src.country_code, src.tier, src.status)
-    """)  # Simplifié pour la démo — en prod on ferait un JOIN sur PG
+    # dim_merchant — même pattern INSERT ... WHERE NOT EXISTS que dim_customer
+    # et dim_payment_method ci-dessous (pas de MERGE ... FROM VALUES : ce
+    # dialecte VALUES attend des littéraux, pas des paramètres liés %s).
+    merchant_vals = list({
+        r["merchant_id"]: (r["merchant_id"], r.get("merchant_country_code"),
+                           r.get("merchant_tier"), r.get("merchant_status"))
+        for r in rows if r.get("merchant_id")
+    }.values())
+    if merchant_vals:
+        sf_cur.executemany(
+            "INSERT INTO dim_merchant (merchant_id, country_code, tier, status) "
+            "SELECT %s, %s, %s, %s WHERE NOT EXISTS "
+            "(SELECT 1 FROM dim_merchant WHERE merchant_id = %s)",
+            [(m[0], m[1], m[2], m[3], m[0]) for m in merchant_vals]
+        )
 
     # dim_customer
     customer_vals = list({
@@ -159,6 +168,11 @@ def load_to_snowflake(rows, target_date: date):
     # Traitement par lots pour contrôler mémoire et temps d'exécution côté driver.
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i: i + BATCH_SIZE]
+
+        # Doit précéder le MERGE de fact_transactions : les FK merchant_key/
+        # customer_key/pm_key résolues plus bas dépendent de ces lignes.
+        upsert_dimensions(cur, batch)
+
         values = []
         for r in batch:
             # fee = 1.4% Stripe standard (démo)
