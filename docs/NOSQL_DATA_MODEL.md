@@ -117,14 +117,23 @@ jours) sont en place pour l'accueillir sans migration.
 ### 2.5 — `ml_features`
 
 ```js
-{ customer_id, /* features consolidées */, last_updated }
+{
+  customer_id,
+  last_amount, last_currency, last_country, last_device_type,
+  velocity_1h, velocity_24h,
+  last_fraud_score, last_decision, last_model_version,
+  last_updated
+}
 ```
 
 Feature store offline pour l'entraînement ML — détaillé dans
 [`ML_INTEGRATION_STRATEGY.md`](ML_INTEGRATION_STRATEGY.md). Index unique
 sur `customer_id` : **une seule ligne par client**, à la différence des
 autres collections qui sont append-only — celle-ci est un **snapshot**
-mis à jour (upsert), pas un historique.
+mis à jour (upsert), pas un historique. Alimentée en continu par
+[`mongo_writer.py`](../producers/mongo_writer.py) (`update_one(...,
+upsert=True)` à chaque transaction scorée) — vérifié en conditions réelles
+(59 documents générés lors des tests de la stack complète).
 
 ### 2.6 — `customer_feedback`
 

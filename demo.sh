@@ -33,8 +33,11 @@ source .env
 set +a
 
 # 3. Démarre les services Docker
+# mlflow est inclus (léger, nécessaire pour `make ml-train`) ; ml-monitor est
+# volontairement omis ici — il n'a d'intérêt qu'une fois un modèle entraîné
+# et du trafic généré, ça n'a pas sa place dans le démarrage à froid.
 echo "Démarrage des services Docker..."
-docker compose --env-file .env up -d postgres redis mongo kafka debezium 2>&1 | tail -3
+docker compose --env-file .env up -d postgres redis mongo kafka debezium mlflow 2>&1 | tail -3
 
 # 4. Attendre que tous les services soient healthy
 echo "Attente des services healthy..."
@@ -102,9 +105,15 @@ echo "════════════════════════�
 echo ""
 echo "  Dashboard :     http://localhost:8501"
 echo "  Kafka Connect : http://localhost:8083"
+echo "  MLflow :        http://localhost:5001"
 echo ""
 echo "  Pour lancer le producer de transactions :"
 echo "    ./venv/bin/python producers/transaction_producer.py --rate 3"
+echo ""
+echo "  Pour activer le scoring ML (après make ml-train) :"
+echo "    pkill -9 -f flink_like_job.py"
+echo "    SCORING_ENGINE=ml ./venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &"
+echo "    docker compose up -d ml-monitor   # drift + réentraînement auto"
 echo ""
 echo "  Pour lancer le test E2E :"
 echo "    ./venv/bin/python tests/test_e2e.py"

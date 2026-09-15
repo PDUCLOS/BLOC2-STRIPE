@@ -24,6 +24,8 @@
 - [3.1 — Racine du projet](#31--racine-du-projet)
 - [3.2 — `producers/`](#32--producers--génération--scoring--persistance)
 - [3.3 — `flink/`](#33--flink--job-pyspark-de-production)
+- [3.3bis — `ml/`](#33bis--ml--entraînement-inférence-et-monitoring-du-modèle-fraude)
+- [3.3ter — `dags/`](#33ter--dags--orchestration-airflow)
 - [3.4 — `dashboard/`](#34--dashboard--streamlit)
 - [3.5 — `seed/`](#35--seed--données-initiales)
 - [3.6 — `etl/`](#36--etl--export-snowflake)
@@ -33,7 +35,7 @@
 - [3.10 — `config/`](#310--config--debezium)
 - [3.11 — `tests/`](#311--tests--end-to-end)
 - [3.12 — `docs/`](#312--docs--documentation)
-- [3.13 — `data/`](#313--data--volumes-docker)
+- [3.13 — Volumes Docker](#313--volumes-docker-nommés-pas-de-bind-mount)
 - [3.14 — `common/`, `venv/`, `__pycache__/`](#314--dossiers-secondaires)
 
 ### 4. Logique interne de chaque fichier
@@ -47,6 +49,9 @@
 - [4.8 — `etl/snowflake_setup.py`](#48--etlsnowflake_setuppy--le-schéma-snowflake)
 - [4.9 — `flink/fraud_scoring_job.py`](#49--flinkfraud_scoring_jobpy--le-job-prod)
 - [4.10 — `_env.py`](#410--_envpy--le-chargeur-denv-universel)
+- [4.11 — `ml/train_fraud_model.py`](#411--mltrain_fraud_modelpy--lentraînement)
+- [4.12 — `ml/scoring.py`](#412--mlscoringpy--linférence)
+- [4.13 — `ml/monitor.py`](#413--mlmonitorpy--le-monitoring)
 
 ### 5. Conventions & bonnes pratiques du repo
 - [5.1 — Convention de nommage des fichiers](#51--convention-de-nommage-des-fichiers)
@@ -77,10 +82,11 @@
 Plateforme **polyglotte** qui simule un système de paiement Stripe :
 - **OLTP** : PostgreSQL 16 (source de vérité des transactions)
 - **CDC** : Debezium capte chaque INSERT/UPDATE et le pousse dans Kafka
-- **Stream processing** : un job de scoring fraude (PyFlink en prod, "Flink-like" Python en démo) lit Kafka, enrichit avec **Redis** (vélocité + features), calcule un `fraud_score` (règle-based v1), décide `allow / review / block`, et écrit dans 2 topics Kafka.
-- **NoSQL** : un consumer Python lit les transactions scorées et les persiste dans **MongoDB** (`transaction_logs` + `fraud_alerts` avec TTL RGPD 90j).
-- **Visualisation** : un dashboard **Streamlit** live branche sur PG + Mongo + Redis.
-- **OLAP** : un ETL batch quotidien exporte les transactions vers **Snowflake** (star schema : `fact_transactions` + 5 dimensions).
+- **Stream processing** : un job de scoring fraude (PyFlink en prod, "Flink-like" Python en démo) lit Kafka, enrichit avec **Redis** (vélocité + features), calcule un `fraud_score` (règles statiques ou **modèle XGBoost entraîné**, selon `SCORING_ENGINE`), décide `allow / review / block`, et écrit dans 2 topics Kafka.
+- **NoSQL** : un consumer Python lit les transactions scorées et les persiste dans **MongoDB** (`transaction_logs`, `fraud_alerts` avec TTL RGPD 90j, `ml_features`).
+- **ML** : `ml/train_fraud_model.py` entraîne le modèle sur l'historique Postgres et trace le run dans **MLflow** ; `ml-monitor` (Evidently) surveille en continu drift et performance, et redéclenche l'entraînement automatiquement en cas de dérive.
+- **Visualisation** : un dashboard **Streamlit** live (2 onglets) branche sur PG + Mongo + Redis + les métriques de monitoring ML.
+- **OLAP** : un DAG **Airflow** (ou `make snowflake-export` en manuel) exporte les transactions vers **Snowflake** (star schema : `fact_transactions` + 5 dimensions).
 
 ### 1.2 — Stack technique
 
@@ -91,20 +97,25 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 | **CDC** | Debezium 2.6 Connect | Capture les changements PG → Kafka |
 | **Stream processing** | PyFlink 1.18 (prod) / Python "flink-like" (démo) | Scoring fraude temps réel |
 | **Feature store online** | Redis 7 | Vélocité 1h/24h, features client |
-| **NoSQL** | MongoDB 7 | Logs + alertes + features pré-calculées |
-| **Visualisation** | Streamlit 1.32 | Dashboard live (KPIs, charts, alertes) |
+| **NoSQL** | MongoDB 7 | Logs, alertes, features ML |
+| **Machine Learning** | XGBoost 2.0 | Modèle de scoring fraude entraîné (fallback règles si absent) |
+| **ML tracking** | MLflow 2.14 | Runs d'entraînement, registre de modèles |
+| **ML monitoring** | Evidently 0.4 | Drift + performance live, réentraînement auto |
+| **Visualisation** | Streamlit 1.32 | Dashboard live, 2 onglets (Vue d'ensemble + Performance ML) |
 | **OLAP** | Snowflake | Star schema, batch quotidien |
-| **Orchestration** | Bash + Makefile (démo) / Airflow (prod) | DAG ETL |
+| **Orchestration** | Apache Airflow 2.9 (profil optionnel) / Makefile | DAG ETL quotidien |
 
 ### 1.3 — URLs utiles
 
 | Service | URL | Credentials |
 |---|---|---|
 | Streamlit Dashboard | http://localhost:8501 | — |
+| MLflow (tracking + registre) | http://localhost:5001 | — |
+| Airflow (si profil `airflow`) | http://localhost:8090 | admin / généré au 1er démarrage (`docker logs stripe-airflow`) |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
 | Flink UI (si profil `flink`) | http://localhost:8081 | — |
 | Kafka brokers | `localhost:9092` (Docker) / `localhost:29092` (host) | — |
-| PostgreSQL | `localhost:5432` | `stripe_app` / `.env` |
+| PostgreSQL | `localhost:5432` | `stripe_app` (ou `analytics_reader` en lecture seule) / `.env` |
 | MongoDB | `localhost:27017` | `admin` / `.env` |
 | Redis | `localhost:6379` | `.env` |
 
@@ -209,8 +220,8 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | `README.md` | Doc | Doc d'entrée — quickstart, architecture, démo | [→](../README.md) |
 | `ARCHITECTURE.md` (ce fichier) | Doc | Doc technique détaillée | [→](./ARCHITECTURE.md) |
 | `PRESENTATION.md` | Doc | Slides de présentation soutenance | [→](./PRESENTATION.md) |
-| `Makefile` | Build | Orchestration : `make init`, `up`, `down`, `seed`, `producer`, `dashboard`, `test`, `flink`, `snowflake-*` | [→](../Makefile) |
-| `docker-compose.yml` | Infra | 8 services : postgres, mongo, kafka, debezium, redis, dashboard (Streamlit), flink-jm/tm (profil `flink`) | [→](../docker-compose.yml) |
+| `Makefile` | Build | Orchestration : `make init`, `up`, `down`, `seed`, `producer`, `dashboard`, `ml-train`, `test`, `flink`, `snowflake-*` | [→](../Makefile) |
+| `docker-compose.yml` | Infra | 8 services par défaut : postgres, mongo, kafka, debezium, redis, dashboard, **mlflow**, **ml-monitor** ; + profils optionnels `flink` (jobmanager/taskmanager) et `airflow` | [→](../docker-compose.yml) |
 | `demo.sh` | Script | Démo one-shot (pour la vidéo) | [→](../demo.sh) |
 | `requirements.txt` | Dépendances | Déps Python locales (producer, dashboard, scripts) | [→](../requirements.txt) |
 | `.env` | Config (gitignored) | Variables d'environnement runtime | [→](../.env) |
@@ -223,8 +234,8 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
 | `transaction_producer.py` | Producer | Génère des transactions continues (5/s, 5% fraude) | [→](../producers/transaction_producer.py) |
-| `flink_like_job.py` | Stream job | **Scoring fraude** temps réel (Flink-like Python) | [→](../producers/flink_like_job.py) |
-| `mongo_writer.py` | Consumer | Lit Kafka `stripe.payments.events` → MongoDB | [→](../producers/mongo_writer.py) |
+| `flink_like_job.py` | Stream job | **Scoring fraude** temps réel — règles ou modèle ML selon `SCORING_ENGINE` | [→](../producers/flink_like_job.py) |
+| `mongo_writer.py` | Consumer | Lit Kafka `stripe.payments.events` → MongoDB (`transaction_logs`, `fraud_alerts`, `ml_features`) | [→](../producers/mongo_writer.py) |
 
 ### 3.3 — `flink/` — Job PyFlink de production
 
@@ -237,11 +248,28 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 > Le profil `flink` n'est **pas activé en démo** (ARM64 Mac → bugs de build). En démo on utilise
 > le `flink_like_job.py` qui a la même logique métier.
 
+### 3.3bis — `ml/` — Entraînement, inférence et monitoring du modèle fraude
+
+| Fichier | Type | Rôle | Lien |
+|---|---|---|---|
+| `features.py` | Module | Feature engineering partagée entraînement/inférence (même vecteur des deux côtés) | [→](../ml/features.py) |
+| `train_fraud_model.py` | Script | Entraîne XGBoost sur l'historique Postgres, trace le run dans MLflow, sauvegarde le `.pkl` | [→](../ml/train_fraud_model.py) |
+| `scoring.py` | Module | Charge le modèle (cache mémoire) et prédit — utilisé par `flink_like_job.py` | [→](../ml/scoring.py) |
+| `monitor.py` | Script | Boucle continue : drift Evidently + performance live + réentraînement auto | [→](../ml/monitor.py) |
+| `Dockerfile` | Infra | Image du service `ml-monitor` | [→](../ml/Dockerfile) |
+| `models/` | Généré (gitignored) | `.pkl` + `.meta.json` produits par `make ml-train` | — |
+
+### 3.3ter — `dags/` — Orchestration Airflow
+
+| Fichier | Type | Rôle | Lien |
+|---|---|---|---|
+| `stripe_daily_etl.py` | DAG | Export quotidien Postgres → Snowflake (02:00 UTC), profil Docker `airflow` | [→](../dags/stripe_daily_etl.py) |
+
 ### 3.4 — `dashboard/` — Streamlit
 
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
-| `app.py` | App web | Dashboard live : KPIs, charts, alertes, transactions suspectes | [→](../dashboard/app.py) |
+| `app.py` | App web | Dashboard live, 2 onglets : Vue d'ensemble (KPIs, charts, alertes) + Performance ML (drift, recall, distribution par modèle) | [→](../dashboard/app.py) |
 | `Dockerfile` | Infra | Image Python 3.11-slim + Streamlit, containerise le dashboard (service `dashboard`, port 8501) | [→](../dashboard/Dockerfile) |
 
 ### 3.5 — `seed/` — Données initiales
@@ -274,11 +302,10 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
-| `init_env.sh` | Bash | Génère `.env` avec secrets aléatoires | [→](../scripts/init_env.sh) |
+| `init_env.sh` | Bash | Génère `.env` avec secrets aléatoires (inclut `PG_ANALYTICS_PASSWORD`) | [→](../scripts/init_env.sh) |
 | `create_topics.sh` | Bash | Crée les 3 topics applicatifs Kafka | [→](../scripts/create_topics.sh) |
-| `postgres_init_roles.sh` | Bash | Crée `replication_user` pour Debezium | [→](../scripts/postgres_init_roles.sh) |
+| `postgres_init_roles.sh` | Bash | Crée `replication_user` (Debezium) + `analytics_reader` (dashboard, lecture seule) | [→](../scripts/postgres_init_roles.sh) |
 | `deploy_debezium.sh` | Bash | Déploie le connecteur Debezium (POST `/connectors`) | [→](../scripts/deploy_debezium.sh) |
-| `deploy_debezium.sh.bak` | Backup | Ancien script (ne pas utiliser) | [→](../scripts/deploy_debezium.sh.bak) |
 
 ### 3.10 — `config/` — Debezium
 
@@ -290,25 +317,31 @@ Le **scoring** est **rule-based v1** (5 règles, poids additifs) :
 
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
-| `test_e2e.py` | Test | 16 tests : PG, Redis, Mongo, pipeline E2E | [→](../tests/test_e2e.py) |
+| `test_e2e.py` | Test | 16 tests : PG, Redis, Mongo, pipeline E2E (nécessite la stack Docker vivante) | [→](../tests/test_e2e.py) |
+| `test_ml_model.py` | Test | Tests du module `ml/` : features, cycle train/save/load, fallback rule-based — **sans Docker** (données synthétiques) | [→](../tests/test_ml_model.py) |
 
 ### 3.12 — `docs/` — Documentation
 
 | Fichier | Type | Rôle | Lien |
 |---|---|---|---|
-| `PRESENTATION.md` | Doc | Slides présentation soutenance | [→](./PRESENTATION.md) |
-| `ARCHITECTURE.md` (ce fichier) | Doc | Doc technique complète | [→](./ARCHITECTURE.md) |
+| `PRESENTATION.md` | Doc | Narratif complet du projet — architecture, choix techniques, limites, soutenance | [→](./PRESENTATION.md) |
+| `ARCHITECTURE.md` (ce fichier) | Doc | Référence technique fichier par fichier | [→](./ARCHITECTURE.md) |
+| `SECURITY_COMPLIANCE_PLAN.md` | Doc | Sécurité, RGPD/PCI-DSS, IAM, monitoring — étend la section RGPD de PRESENTATION.md | [→](./SECURITY_COMPLIANCE_PLAN.md) |
+| `ML_INTEGRATION_STRATEGY.md` | Doc | Stratégie ML détaillée : feature store, entraînement, déploiement, monitoring | [→](./ML_INTEGRATION_STRATEGY.md) |
+| `OLAP_SCHEMA_DESIGN.md` | Doc | Star schema Snowflake, clustering, stratégies d'agrégation et d'optimisation | [→](./OLAP_SCHEMA_DESIGN.md) |
+| `NOSQL_DATA_MODEL.md` | Doc | Schéma MongoDB collection par collection, relations, stratégie d'indexation | [→](./NOSQL_DATA_MODEL.md) |
 
-### 3.13 — `data/` — Volumes Docker
+### 3.13 — Volumes Docker (nommés, pas de bind mount)
 
-> Ne **jamais** éditer à la main. C'est ce que Docker monte pour les services :
-> - `data/postgres/` → données PG (volume postgres-data bind-mounté)
-> - `data/mongo/` → données Mongo (volume mongo-data)
-> - `data/redis/` → AOF + RDB Redis
-> - `data/kafka/` → logs Kafka
-> - `data/debezium/` → connecteurs Debezium
-> - `data/flink/checkpoints/` → checkpoints Flink (si profil `flink`)
-> - `data/snowflake_export/` → exports batch (créé à la demande)
+> Tous les volumes de données sont des **volumes Docker nommés**
+> (`postgres-data`, `mongo-data`, `redis-data`, `kafka-data`, `debezium-data`,
+> `flink-data`, `mlflow-data`, `airflow-data`) — plus de dossier `./data/`
+> bind-monté. Ce choix évite deux classes de bugs rencontrées en pratique :
+> les bind mounts cassent sous virtiofs (Docker Desktop macOS, cf. §4.2 de
+> PRESENTATION.md) et sous FUSE (Google Drive, cf. §4.9 de PRESENTATION.md) —
+> WiredTiger (Mongo) et Kafka refusent tous deux d'écrire sur ces systèmes de
+> fichiers. `docker volume ls | grep stripe-polyglot` pour les lister ; ne
+> jamais les éditer à la main, seul Docker doit y écrire.
 
 ### 3.14 — Dossiers secondaires
 
@@ -534,6 +567,52 @@ import _env  # noqa: F401
 > **Pourquoi pas un `common/env.py` ?** Parce que ce `sys.path.insert(0, ...)` ne marche
 > pas toujours quand le script est lancé depuis un autre CWD. `_env.py` à la racine est
 > trouvable par n'importe quel script.
+
+---
+
+### 4.11 — [`ml/train_fraud_model.py`](../ml/train_fraud_model.py) — L'entraînement
+
+**Rôle** : Entraîne le modèle XGBoost de scoring fraude et trace le run dans MLflow.
+
+**Logique** :
+1. `extract_training_data()` — requête Postgres avec vélocité recalculée par sous-requête corrélée (même sémantique que Redis en live) + label `is_fraud` = `metadata->>'is_fraud_pattern'` (la vérité terrain posée par le générateur, **pas** la décision du moteur à règles — sinon le modèle réapprendrait juste les seuils des règles au lieu de détecter la fraude réellement injectée)
+2. `build_dataset()` — vectorise via `ml/features.py` (même fonction que l'inférence)
+3. `temporal_train_test_split()` — split chronologique 80/20 (pas aléatoire, pour éviter une fuite d'information via la corrélation temporelle des clients)
+4. `train_model()` — XGBoost avec `scale_pos_weight` calculé pour compenser le déséquilibre de classes
+5. Le tout tourne dans un `mlflow.start_run()` : params, métriques, et le modèle (`mlflow.xgboost.log_model(..., registered_model_name="fraud-detector")`) sont tracés ensemble
+6. Sauvegarde locale : `ml/models/fraud_xgboost-v1.pkl` + `.meta.json` (repris par `ml/scoring.py` côté inférence)
+
+**Dépendances** : Postgres (source), MLflow (tracking — fallback fichier local si `MLFLOW_TRACKING_URI` absent).
+
+**Point d'attention** : `extract_current_window()`, dans ce même fichier, est réutilisée par `ml/monitor.py` — même requête, bornée sur une fenêtre récente au lieu de tout l'historique.
+
+---
+
+### 4.12 — [`ml/scoring.py`](../ml/scoring.py) — L'inférence
+
+**Rôle** : Charge le modèle entraîné et calcule un `fraud_score`, appelé depuis `flink_like_job.py` quand `SCORING_ENGINE=ml`.
+
+**Logique** :
+1. `load_model()` — chargement paresseux, mis en cache en mémoire au premier appel (pas de relecture disque à chaque transaction)
+2. Si le fichier `.pkl` n'existe pas (pas encore entraîné) : renvoie `None`, jamais d'exception — c'est ce `None` que `flink_like_job.py` interprète comme "retombe sur les règles"
+3. `score()` — construit le vecteur de features (`ml/features.py`) et renvoie `model.predict_proba(...)[0, 1]`
+
+**Point d'attention** : le cache mémoire ne se rafraîchit jamais tant que le process tourne — un réentraînement (manuel ou via `ml/monitor.py`) écrase le fichier, mais un scorer déjà lancé continue sur l'ancienne version jusqu'à son redémarrage (limite documentée, cf. `PRESENTATION.md` §3.8).
+
+---
+
+### 4.13 — [`ml/monitor.py`](../ml/monitor.py) — Le monitoring
+
+**Rôle** : Boucle continue qui détecte la dérive du modèle et déclenche un réentraînement automatique. Tourne dans le service Docker `ml-monitor`.
+
+**Logique** (`check_once()`, appelée toutes les `ML_MONITOR_INTERVAL_SECONDS`) :
+1. Récupère la référence (`extract_training_data()` + le même split que l'entraînement) et la fenêtre courante (`extract_current_window()`)
+2. `compute_drift()` — Evidently `DataDriftPreset`, extrait `share_of_drifted_columns`
+3. `compute_live_performance()` — applique le modèle actuel aux données fraîches, calcule precision/recall/f1 contre la vérité terrain
+4. Si `drift_share > ML_DRIFT_THRESHOLD` OU `recall < ML_MIN_RECALL` : appelle `train_fraud_model.main()` directement (import Python, pas un sous-process) — protégé par un cooldown pour ne pas réentraîner à chaque cycle si le problème persiste
+5. Écrit un document dans `MongoDB.ml_monitoring` à chaque cycle — c'est la source de données de l'onglet "Performance ML" du dashboard
+
+**Dépendances** : Postgres (données), MongoDB (écriture du statut), MLflow (tracking des réentraînements déclenchés), `ml/train_fraud_model.py` (import direct).
 
 ---
 

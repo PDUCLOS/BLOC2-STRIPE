@@ -323,6 +323,64 @@ def recent_suspicious():
         ORDER BY t.created_at DESC LIMIT 15
     """)
 
+def ml_monitoring_latest():
+    """Récupère le dernier cycle de monitoring écrit par le service ml-monitor.
+
+    Returns:
+        dict | None: Document ml_monitoring le plus récent, ou None si
+        MongoDB est indisponible ou si le service ml-monitor n'a pas encore
+        tourné (collection vide).
+    """
+    db = get_mongo()
+    if db is None:
+        return None
+    try:
+        return db.ml_monitoring.find_one(sort=[("checked_at", -1)])
+    except Exception:
+        return None
+
+def ml_monitoring_history(limit=50):
+    """Récupère l'historique des derniers cycles de monitoring, pour le graphe d'évolution.
+
+    Args:
+        limit (int): Nombre max de cycles à récupérer.
+
+    Returns:
+        list[dict]: Documents ml_monitoring, du plus récent au plus ancien.
+    """
+    db = get_mongo()
+    if db is None:
+        return []
+    try:
+        return list(db.ml_monitoring.find({}, sort=[("checked_at", -1)], limit=limit))
+    except Exception:
+        return []
+
+def fraud_score_by_model_version(limit=300):
+    """Récupère les scores de fraude récents groupés par version de modèle.
+
+    Permet de visualiser si le modèle ML (xgboost-v1) et le moteur à règles
+    (rule-based-v1) produisent des distributions de score différentes —
+    utile pour repérer un des deux moteurs qui déclencherait trop/pas assez.
+
+    Args:
+        limit (int): Nombre max d'alertes à récupérer.
+
+    Returns:
+        pd.DataFrame: Colonnes fraud_score, model_version.
+    """
+    db = get_mongo()
+    if db is None:
+        return pd.DataFrame()
+    try:
+        docs = list(db.fraud_alerts.find(
+            {}, {"fraud_score": 1, "model_version": 1, "_id": 0},
+            sort=[("created_at", -1)], limit=limit
+        ))
+        return pd.DataFrame(docs)
+    except Exception:
+        return pd.DataFrame()
+
 # ── SIDEBAR ────────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.image("https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg", width=120)
@@ -355,197 +413,306 @@ with st.sidebar:
 st.title("Stripe Polyglot — Dashboard Temps Réel")
 st.caption(f"Dernière mise à jour : {datetime.now(timezone.utc).strftime('%H:%M:%S UTC')}")
 
-# ── KPIs ───────────────────────────────────────────────────────────────────────
-# NOTE SOUTENANCE : commencer par ces 5 tuiles pour poser la valeur métier.
-# Message recommandé : volume traité, revenu, puis exposition au risque fraude.
-# Cette séquence évite de "plonger" trop tôt dans la technique.
-kpis = kpis_from_pg()
-if kpis:
-    col1, col2, col3, col4, col5 = st.columns(5)
-    col1.metric("Transactions totales", f"{kpis['total']:,}")
-    col2.metric("Txns (1h)", f"{kpis['txns_1h']:,}")
-    col3.metric("Revenus", f"{kpis['revenue_eur']:,.0f} €")
-    col4.metric("Alertes fraude", f"{kpis['fraud_count']:,}", delta=f"{kpis['fraud_rate']}% du volume", delta_color="inverse")
-    col5.metric("Score fraude moyen", f"{kpis['avg_score']:.3f}")
-else:
-    st.warning("PostgreSQL pas encore disponible — lance `make up` puis `make seed`")
+tab_overview, tab_ml = st.tabs(["Vue d'ensemble", "Performance ML"])
 
-st.divider()
+with tab_overview:
+    # ── KPIs ───────────────────────────────────────────────────────────────────────
+    # NOTE SOUTENANCE : commencer par ces 5 tuiles pour poser la valeur métier.
+    # Message recommandé : volume traité, revenu, puis exposition au risque fraude.
+    # Cette séquence évite de "plonger" trop tôt dans la technique.
+    kpis = kpis_from_pg()
+    if kpis:
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Transactions totales", f"{kpis['total']:,}")
+        col2.metric("Txns (1h)", f"{kpis['txns_1h']:,}")
+        col3.metric("Revenus", f"{kpis['revenue_eur']:,.0f} €")
+        col4.metric("Alertes fraude", f"{kpis['fraud_count']:,}", delta=f"{kpis['fraud_rate']}% du volume", delta_color="inverse")
+        col5.metric("Score fraude moyen", f"{kpis['avg_score']:.3f}")
+    else:
+        st.warning("PostgreSQL pas encore disponible — lance `make up` puis `make seed`")
 
-# ── CHARTS ROW 1 ───────────────────────────────────────────────────────────────
-# NOTE SOUTENANCE : ici on prouve le "temps réel".
-# Graphe gauche = dynamique minute par minute ; graphe droit = segmentation géographique
-# utile pour expliquer la détection d'anomalies par zone.
-col_left, col_right = st.columns([2, 1])
+    st.divider()
 
-with col_left:
-    st.subheader("Transactions & Fraude — 30 dernières minutes")
-    df_time = txn_over_time()
-    if not df_time.empty and "minute" in df_time.columns:
-        df_time["minute"] = pd.to_datetime(df_time["minute"])
+    # ── CHARTS ROW 1 ───────────────────────────────────────────────────────────────
+    # NOTE SOUTENANCE : ici on prouve le "temps réel".
+    # Graphe gauche = dynamique minute par minute ; graphe droit = segmentation géographique
+    # utile pour expliquer la détection d'anomalies par zone.
+    col_left, col_right = st.columns([2, 1])
+
+    with col_left:
+        st.subheader("Transactions & Fraude — 30 dernières minutes")
+        df_time = txn_over_time()
+        if not df_time.empty and "minute" in df_time.columns:
+            df_time["minute"] = pd.to_datetime(df_time["minute"])
+            fig = go.Figure()
+            fig.add_trace(go.Scatter(
+                x=df_time["minute"], y=df_time["count"],
+                name="Total transactions", line=dict(color="#635BFF", width=2),
+                fill="tozeroy", fillcolor="rgba(99,91,255,0.08)"
+            ))
+            fig.add_trace(go.Scatter(
+                x=df_time["minute"], y=df_time["fraud_count"],
+                name="Transactions frauduleuses", line=dict(color="#ff4444", width=2),
+                fill="tozeroy", fillcolor="rgba(255,68,68,0.08)"
+            ))
+            fig.update_layout(
+                height=280, margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                legend=dict(orientation="h", y=1.1),
+                xaxis=dict(gridcolor="#333"), yaxis=dict(gridcolor="#333")
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("En attente de données... Lance le producer : `make producer`")
+
+    with col_right:
+        st.subheader("Fraude par pays")
+        df_geo = fraud_by_country()
+        if not df_geo.empty:
+            fig_geo = px.bar(
+                df_geo, x="fraud_count", y="ip_country", orientation="h",
+                color="fraud_count",
+                color_continuous_scale=[[0, "#635BFF"], [0.5, "#ff8800"], [1, "#ff4444"]],
+                height=280
+            )
+            fig_geo.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                coloraxis_showscale=False,
+                yaxis=dict(gridcolor="#333"), xaxis=dict(gridcolor="#333")
+            )
+            st.plotly_chart(fig_geo, use_container_width=True)
+        else:
+            st.info("Pas encore d'alertes fraude")
+
+    st.divider()
+
+    # ── CHARTS ROW 2 ───────────────────────────────────────────────────────────────
+    # NOTE SOUTENANCE : ce bloc relie performance commerciale et contrôle du risque.
+    # "Top marchands" montre l'activité business ; "Alertes MongoDB" montre la réaction
+    # opérationnelle du moteur fraude (review/block) sur les mêmes flux.
+    col_merch, col_alerts = st.columns([1, 1])
+
+    with col_merch:
+        st.subheader("Top marchands (GMV)")
+        df_merch = top_merchants()
+        if not df_merch.empty:
+            fig_merch = px.bar(
+                df_merch, x="gmv", y="name", orientation="h",
+                text_auto=".0f",
+                color="txn_count",
+                color_continuous_scale=[[0, "#635BFF"], [1, "#9d97ff"]],
+                height=300
+            )
+            fig_merch.update_layout(
+                margin=dict(l=0, r=0, t=10, b=0),
+                paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+                coloraxis_showscale=False,
+                yaxis=dict(gridcolor="#333"), xaxis=dict(gridcolor="#333")
+            )
+            st.plotly_chart(fig_merch, use_container_width=True)
+        else:
+            st.info("Aucun marchand — lance `make seed`")
+
+    with col_alerts:
+        st.subheader("Alertes MongoDB (review/block)")
+        alerts = fraud_alerts_mongo(10)
+        if alerts:
+            for a in alerts:
+                decision = a.get("decision", "?")
+                # Mapping visuel simple pour différencier immédiatement review vs block.
+                color = "[BLOCK]" if decision == "block" else "[REVIEW]"
+                amount = (a.get("amount") or 0) / 100
+                score = a.get("fraud_score", 0)
+                country = a.get("ip_country", "?")
+                rules = ", ".join(a.get("rules_triggered") or []) or "—"
+                ts = a.get("created_at", "")
+                if hasattr(ts, "strftime"):
+                    ts = ts.strftime("%H:%M:%S")
+                st.markdown(
+                    f"""<div class="{'alert-card' if decision == 'block' else 'ok-card'}">
+                    {color} <b>{decision.upper()}</b> · {amount:.2f}€ · {country} · score={score:.3f}<br>
+                    <small>Règles : {rules} · {ts}</small>
+                    </div>""",
+                    unsafe_allow_html=True
+                )
+        else:
+            st.info("Aucune alerte dans MongoDB — le pipeline est-il actif ?")
+
+    st.divider()
+
+    # ── TRANSACTIONS SUSPECTES ─────────────────────────────────────────────────────
+    # NOTE SOUTENANCE : terminer par cette table pour la traçabilité transactionnelle.
+    # Elle permet d'illustrer qu'une alerte est explicable (score, pays, device, horodatage),
+    # ce qui renforce le discours conformité/auditabilité.
+    st.subheader("Transactions suspectes récentes (score ≥ 0.6)")
+    df_sus = recent_suspicious()
+    if not df_sus.empty:
+        # Conserve la logique de coloration pour un futur .style.applymap ; non activé
+        # ici pour privilégier un affichage Streamlit stable et lisible en démo.
+        def color_score(val):
+            if val is None:
+                return ""
+            val = float(val)
+            if val >= FRAUD_THRESHOLD:
+                return "background-color: #3d1515; color: #ff6666"
+            elif val >= 0.6:
+                return "background-color: #3d2d10; color: #ffaa44"
+            return ""
+
+        st.dataframe(
+            df_sus.rename(columns={
+                "txn_id": "ID Transaction", "amount_eur": "Montant (€)",
+                "currency": "Devise", "fraud_score": "Score fraude",
+                "ip_country": "Pays IP", "device_type": "Device",
+                "created_at": "Horodatage"
+            }),
+            use_container_width=True,
+            height=300,
+        )
+    else:
+        st.info("Aucune transaction suspecte pour l'instant")
+
+    st.divider()
+
+    # ── ARCHITECTURE ───────────────────────────────────────────────────────────────
+    # NOTE SOUTENANCE : ouvrir cet expander en fin de démo pour reconnecter les visuels
+    # au pipeline complet (OLTP -> CDC -> Kafka -> scoring -> NoSQL -> OLAP).
+    with st.expander("Architecture — Pipeline de traitement", expanded=False):
+        st.markdown("""
+    ```
+    API Stripe
+        ↓
+    PostgreSQL 16 (OLTP · ACID · 3NF)
+        ↓ WAL
+    Debezium CDC
+        ↓
+    Apache Kafka (stripe.public.transactions)
+        ↓
+    Flink-like Scorer (Python · Redis feature store)
+        ├─ fraud_score → UPDATE transactions.fraud_score
+        ├─ stripe.payments.events (toutes les txns)
+        └─ stripe.fraud.alerts (review/block)
+                  ↓
+             MongoDB Writer
+                  ├─ transaction_logs (TTL 90j · RGPD)
+                  └─ fraud_alerts
+
+    Airflow (batch · 02:00 UTC)
+        ↓
+    Snowflake OLAP (star schema · fact_transactions + 5 dims)
+    ```
+
+    **Garanties** : PCI-DSS v4.0 · RGPD · TLS 1.3 · RBAC · AWS KMS  
+    **Latence fraude** : < 50ms bout en bout  
+    **Throughput** : 10 000+ transactions/s (Kafka · 12 partitions)
+        """)
+
+
+with tab_ml:
+    # ── ONGLET PERFORMANCE ML ───────────────────────────────────────────────
+    # NOTE SOUTENANCE : cet onglet répond à l'exigence "monitoring de la
+    # performance du modèle ML" — alimenté par le service ml-monitor
+    # (Evidently pour le drift, sklearn pour precision/recall) qui tourne en
+    # continu et déclenche un réentraînement automatique en cas de dérive
+    # (cf. docs/ML_INTEGRATION_STRATEGY.md).
+    st.subheader("Performance du modèle ML")
+    st.caption("Suivi drift + précision de xgboost-v1, alimenté par le service ml-monitor (Evidently + MLflow)")
+
+    latest = ml_monitoring_latest()
+    if latest is None:
+        st.info("Aucune donnée de monitoring pour l'instant — le service ml-monitor tourne-t-il ? "
+                "(`docker compose up -d ml-monitor`)")
+    else:
+        status = latest.get("status", "?")
+        drift = latest.get("drift") or {}
+        perf = latest.get("performance") or {}
+
+        col1, col2, col3, col4 = st.columns(4)
+        col1.metric("Statut", status.upper())
+        col2.metric("Drift (part colonnes)", f"{drift.get('drift_share', 0):.2f}")
+        col3.metric("Recall live", f"{perf['recall']:.2f}" if perf else "—")
+        col4.metric("Version modèle", latest.get("model_version", "—"))
+
+        if latest.get("alert_reasons"):
+            st.warning("Alerte déclenchée : " + " ; ".join(latest["alert_reasons"]))
+        if latest.get("retrain_triggered"):
+            st.success("Réentraînement automatique déclenché à ce cycle.")
+
+        checked_at = latest.get("checked_at")
+        ts_str = checked_at.strftime("%Y-%m-%d %H:%M:%S UTC") if hasattr(checked_at, "strftime") else str(checked_at)
+        st.caption(f"Dernier check : {ts_str} · référence={latest.get('n_reference', '?')} lignes"
+                   f" · fenêtre courante={latest.get('n_current', '?')} lignes")
+
+    st.divider()
+
+    st.subheader("Évolution drift / recall dans le temps")
+    history = ml_monitoring_history(50)
+    if history:
+        rows = []
+        for h in reversed(history):  # remet en ordre chronologique pour le graphe
+            perf_h = h.get("performance") or {}
+            drift_h = h.get("drift") or {}
+            rows.append({
+                "checked_at": h.get("checked_at"),
+                "drift_share": drift_h.get("drift_share"),
+                "recall": perf_h.get("recall"),
+                "retrain": bool(h.get("retrain_triggered")),
+            })
+        df_hist = pd.DataFrame(rows)
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=df_time["minute"], y=df_time["count"],
-            name="Total transactions", line=dict(color="#635BFF", width=2),
-            fill="tozeroy", fillcolor="rgba(99,91,255,0.08)"
+            x=df_hist["checked_at"], y=df_hist["drift_share"],
+            name="Drift share", line=dict(color="#ff8800", width=2)
         ))
         fig.add_trace(go.Scatter(
-            x=df_time["minute"], y=df_time["fraud_count"],
-            name="Transactions frauduleuses", line=dict(color="#ff4444", width=2),
-            fill="tozeroy", fillcolor="rgba(255,68,68,0.08)"
+            x=df_hist["checked_at"], y=df_hist["recall"],
+            name="Recall live", line=dict(color="#635BFF", width=2)
         ))
+        retrains = df_hist[df_hist["retrain"]]
+        if not retrains.empty:
+            # Marqueurs distincts pour repérer visuellement quand un
+            # réentraînement automatique a été déclenché sur la chronologie.
+            fig.add_trace(go.Scatter(
+                x=retrains["checked_at"], y=[1.02] * len(retrains), mode="markers",
+                name="Réentraînement déclenché",
+                marker=dict(color="#ff4444", size=10, symbol="triangle-down")
+            ))
         fig.update_layout(
-            height=280, margin=dict(l=0, r=0, t=10, b=0),
+            height=300, margin=dict(l=0, r=0, t=10, b=0),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            legend=dict(orientation="h", y=1.1),
-            xaxis=dict(gridcolor="#333"), yaxis=dict(gridcolor="#333")
+            legend=dict(orientation="h", y=1.15),
+            xaxis=dict(gridcolor="#333"), yaxis=dict(gridcolor="#333", range=[0, 1.1]),
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
-        st.info("En attente de données... Lance le producer : `make producer`")
+        st.info("Pas encore d'historique de monitoring à afficher")
 
-with col_right:
-    st.subheader("Fraude par pays")
-    df_geo = fraud_by_country()
-    if not df_geo.empty:
-        fig_geo = px.bar(
-            df_geo, x="fraud_count", y="ip_country", orientation="h",
-            color="fraud_count",
-            color_continuous_scale=[[0, "#635BFF"], [0.5, "#ff8800"], [1, "#ff4444"]],
-            height=280
+    st.divider()
+
+    st.subheader("Distribution des scores par version de modèle")
+    df_scores = fraud_score_by_model_version()
+    if not df_scores.empty:
+        fig_hist = px.histogram(
+            df_scores, x="fraud_score", color="model_version", nbins=20,
+            color_discrete_sequence=["#635BFF", "#ff8800"], barmode="overlay", opacity=0.7,
         )
-        fig_geo.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0),
+        fig_hist.update_layout(
+            height=280, margin=dict(l=0, r=0, t=10, b=0),
             paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            coloraxis_showscale=False,
-            yaxis=dict(gridcolor="#333"), xaxis=dict(gridcolor="#333")
+            legend=dict(orientation="h", y=1.1),
+            xaxis=dict(gridcolor="#333"), yaxis=dict(gridcolor="#333"),
         )
-        st.plotly_chart(fig_geo, use_container_width=True)
+        st.plotly_chart(fig_hist, use_container_width=True)
     else:
-        st.info("Pas encore d'alertes fraude")
+        st.info("Pas encore d'alertes scorées pour comparer rule-based-v1 et xgboost-v1")
 
-st.divider()
+    st.divider()
 
-# ── CHARTS ROW 2 ───────────────────────────────────────────────────────────────
-# NOTE SOUTENANCE : ce bloc relie performance commerciale et contrôle du risque.
-# "Top marchands" montre l'activité business ; "Alertes MongoDB" montre la réaction
-# opérationnelle du moteur fraude (review/block) sur les mêmes flux.
-col_merch, col_alerts = st.columns([1, 1])
-
-with col_merch:
-    st.subheader("Top marchands (GMV)")
-    df_merch = top_merchants()
-    if not df_merch.empty:
-        fig_merch = px.bar(
-            df_merch, x="gmv", y="name", orientation="h",
-            text_auto=".0f",
-            color="txn_count",
-            color_continuous_scale=[[0, "#635BFF"], [1, "#9d97ff"]],
-            height=300
-        )
-        fig_merch.update_layout(
-            margin=dict(l=0, r=0, t=10, b=0),
-            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
-            coloraxis_showscale=False,
-            yaxis=dict(gridcolor="#333"), xaxis=dict(gridcolor="#333")
-        )
-        st.plotly_chart(fig_merch, use_container_width=True)
-    else:
-        st.info("Aucun marchand — lance `make seed`")
-
-with col_alerts:
-    st.subheader("Alertes MongoDB (review/block)")
-    alerts = fraud_alerts_mongo(10)
-    if alerts:
-        for a in alerts:
-            decision = a.get("decision", "?")
-            # Mapping visuel simple pour différencier immédiatement review vs block.
-            color = "[BLOCK]" if decision == "block" else "[REVIEW]"
-            amount = (a.get("amount") or 0) / 100
-            score = a.get("fraud_score", 0)
-            country = a.get("ip_country", "?")
-            rules = ", ".join(a.get("rules_triggered") or []) or "—"
-            ts = a.get("created_at", "")
-            if hasattr(ts, "strftime"):
-                ts = ts.strftime("%H:%M:%S")
-            st.markdown(
-                f"""<div class="{'alert-card' if decision == 'block' else 'ok-card'}">
-                {color} <b>{decision.upper()}</b> · {amount:.2f}€ · {country} · score={score:.3f}<br>
-                <small>Règles : {rules} · {ts}</small>
-                </div>""",
-                unsafe_allow_html=True
-            )
-    else:
-        st.info("Aucune alerte dans MongoDB — le pipeline est-il actif ?")
-
-st.divider()
-
-# ── TRANSACTIONS SUSPECTES ─────────────────────────────────────────────────────
-# NOTE SOUTENANCE : terminer par cette table pour la traçabilité transactionnelle.
-# Elle permet d'illustrer qu'une alerte est explicable (score, pays, device, horodatage),
-# ce qui renforce le discours conformité/auditabilité.
-st.subheader("Transactions suspectes récentes (score ≥ 0.6)")
-df_sus = recent_suspicious()
-if not df_sus.empty:
-    # Conserve la logique de coloration pour un futur .style.applymap ; non activé
-    # ici pour privilégier un affichage Streamlit stable et lisible en démo.
-    def color_score(val):
-        if val is None:
-            return ""
-        val = float(val)
-        if val >= FRAUD_THRESHOLD:
-            return "background-color: #3d1515; color: #ff6666"
-        elif val >= 0.6:
-            return "background-color: #3d2d10; color: #ffaa44"
-        return ""
-
-    st.dataframe(
-        df_sus.rename(columns={
-            "txn_id": "ID Transaction", "amount_eur": "Montant (€)",
-            "currency": "Devise", "fraud_score": "Score fraude",
-            "ip_country": "Pays IP", "device_type": "Device",
-            "created_at": "Horodatage"
-        }),
-        use_container_width=True,
-        height=300,
-    )
-else:
-    st.info("Aucune transaction suspecte pour l'instant")
-
-st.divider()
-
-# ── ARCHITECTURE ───────────────────────────────────────────────────────────────
-# NOTE SOUTENANCE : ouvrir cet expander en fin de démo pour reconnecter les visuels
-# au pipeline complet (OLTP -> CDC -> Kafka -> scoring -> NoSQL -> OLAP).
-with st.expander("Architecture — Pipeline de traitement", expanded=False):
-    st.markdown("""
-```
-API Stripe
-    ↓
-PostgreSQL 16 (OLTP · ACID · 3NF)
-    ↓ WAL
-Debezium CDC
-    ↓
-Apache Kafka (stripe.public.transactions)
-    ↓
-Flink-like Scorer (Python · Redis feature store)
-    ├─ fraud_score → UPDATE transactions.fraud_score
-    ├─ stripe.payments.events (toutes les txns)
-    └─ stripe.fraud.alerts (review/block)
-              ↓
-         MongoDB Writer
-              ├─ transaction_logs (TTL 90j · RGPD)
-              └─ fraud_alerts
-
-Airflow (batch · 02:00 UTC)
-    ↓
-Snowflake OLAP (star schema · fact_transactions + 5 dims)
-```
-
-**Garanties** : PCI-DSS v4.0 · RGPD · TLS 1.3 · RBAC · AWS KMS  
-**Latence fraude** : < 50ms bout en bout  
-**Throughput** : 10 000+ transactions/s (Kafka · 12 partitions)
-    """)
+    mlflow_ui = os.environ.get("MLFLOW_UI_URL", "http://localhost:5001")
+    st.markdown(f"[Ouvrir MLflow — runs d'entraînement et registre de modèles]({mlflow_ui})")
+    st.caption("Chaque réentraînement (manuel via `make ml-train`, ou automatique via ml-monitor) "
+               "crée un nouveau run tracé : hyperparamètres, métriques, modèle versionné.")
 
 # ── FOOTER + AUTO-REFRESH ──────────────────────────────────────────────────────
 st.caption("Certification AIA RNCP41993 · Bloc 2 · Patrice Duclos · 2026")

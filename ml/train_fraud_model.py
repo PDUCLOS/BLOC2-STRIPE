@@ -29,8 +29,16 @@ from sklearn.metrics import (
 )
 import xgboost as xgb
 import joblib
+import mlflow
+import mlflow.xgboost
 
 from ml.features import FEATURE_NAMES, build_feature_vector
+
+# Si absent (usage hors Docker, ex. lancé depuis le Mac host), retombe sur un
+# tracking local fichier plutôt que de planter — cohérent avec le principe de
+# fallback déjà appliqué à SCORING_ENGINE dans producers/flink_like_job.py.
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "file:./mlruns")
+MLFLOW_EXPERIMENT = "fraud-detection"
 
 PG_CONFIG = dict(
     host=os.environ.get("PG_HOST", "localhost"),
@@ -95,6 +103,52 @@ def extract_training_data():
     return pd.DataFrame(rows)
 
 
+def extract_current_window(minutes: int):
+    """Extrait les transactions des `minutes` dernières minutes — utilisé par
+    ml/monitor.py comme fenêtre "courante" à comparer à la référence d'entraînement.
+
+    Mêmes colonnes et même calcul de vélocité que extract_training_data() (la
+    comparaison drift/performance n'a de sens que si les deux jeux de données
+    sont construits de façon strictement identique).
+
+    Args:
+        minutes (int): Taille de la fenêtre glissante en minutes.
+
+    Returns:
+        pd.DataFrame: une ligne par transaction récente.
+    """
+    conn = psycopg2.connect(**PG_CONFIG)
+    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+        cur.execute("""
+            SELECT
+                t.txn_id,
+                t.amount,
+                t.created_at,
+                t.ip_country,
+                t.device_type,
+                (SELECT COUNT(*) FROM transactions t2
+                   WHERE t2.customer_id = t.customer_id
+                     AND t2.created_at >= t.created_at - INTERVAL '1 hour'
+                     AND t2.created_at < t.created_at) AS velocity_1h,
+                (SELECT COUNT(*) FROM transactions t2
+                   WHERE t2.customer_id = t.customer_id
+                     AND t2.created_at >= t.created_at - INTERVAL '24 hours'
+                     AND t2.created_at < t.created_at) AS velocity_24h,
+                (t.metadata->>'is_fraud_pattern')::boolean AS is_fraud
+            FROM transactions t
+            WHERE t.customer_id IS NOT NULL
+              AND t.metadata ? 'is_fraud_pattern'
+              -- make_interval() plutôt qu'un INTERVAL littéral : permet de
+              -- passer `minutes` comme paramètre lié au lieu de l'interpoler
+              -- dans la chaîne SQL.
+              AND t.created_at >= NOW() - make_interval(mins => %s)
+            ORDER BY t.created_at
+        """, (minutes,))
+        rows = cur.fetchall()
+    conn.close()
+    return pd.DataFrame(rows)
+
+
 def build_dataset(df: pd.DataFrame):
     """Transforme le DataFrame brut en matrice de features (X) et labels (y).
 
@@ -142,7 +196,9 @@ def train_model(X_train, y_train):
         X_train, y_train: Données d'entraînement.
 
     Returns:
-        xgb.XGBClassifier: Modèle entraîné.
+        tuple: (xgb.XGBClassifier entraîné, dict des hyperparamètres utilisés
+        — renvoyés séparément pour que main() puisse les logger dans MLflow
+        sans dupliquer leur définition).
     """
     n_pos = int(y_train.sum())
     n_neg = len(y_train) - n_pos
@@ -151,7 +207,7 @@ def train_model(X_train, y_train):
     # sans ce poids, le modèle apprendrait trivialement à toujours prédire "légitime".
     scale_pos_weight = (n_neg / n_pos) if n_pos > 0 else 1.0
 
-    model = xgb.XGBClassifier(
+    params = dict(
         n_estimators=200,
         max_depth=4,
         learning_rate=0.1,
@@ -159,8 +215,9 @@ def train_model(X_train, y_train):
         eval_metric="logloss",
         random_state=42,
     )
+    model = xgb.XGBClassifier(**params)
     model.fit(X_train, y_train)
-    return model
+    return model, params
 
 
 def evaluate_model(model, X_test, y_test):
@@ -189,6 +246,10 @@ def evaluate_model(model, X_test, y_test):
 def main():
     print(f"[START] Entraînement modèle fraude ({MODEL_VERSION})")
     print(f"   Source : {PG_CONFIG['host']}/{PG_CONFIG['dbname']}")
+    print(f"   MLflow : {MLFLOW_TRACKING_URI}")
+
+    mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)
+    mlflow.set_experiment(MLFLOW_EXPERIMENT)
 
     print("Extraction des données d'entraînement...")
     df = extract_training_data()
@@ -200,7 +261,8 @@ def main():
         sys.exit(1)
 
     fraud_count = int(df["is_fraud"].sum())
-    print(f"   dont {fraud_count} fraudes ({fraud_count/len(df)*100:.1f}%)")
+    fraud_ratio = fraud_count / len(df)
+    print(f"   dont {fraud_count} fraudes ({fraud_ratio*100:.1f}%)")
 
     print("\nConstruction des features...")
     X, y = build_dataset(df)
@@ -211,29 +273,48 @@ def main():
     print(f"  → train : {len(X_train)} lignes ({int(y_train.sum())} fraudes)")
     print(f"  → test  : {len(X_test)} lignes ({int(y_test.sum())} fraudes)")
 
-    print("\nEntraînement XGBoost...")
-    model = train_model(X_train, y_train)
-    print("  [OK] Modèle entraîné")
+    # Un run MLflow par entraînement : params, métriques et modèle sérialisé
+    # sont tracés ensemble, consultables dans l'UI MLflow (http://localhost:5000)
+    # pour comparer les versions successives du modèle au fil des réentraînements.
+    with mlflow.start_run(run_name=f"{MODEL_VERSION}-{datetime.now(timezone.utc):%Y%m%d-%H%M%S}"):
+        print("\nEntraînement XGBoost...")
+        model, params = train_model(X_train, y_train)
+        print("  [OK] Modèle entraîné")
+        mlflow.log_params(params)
+        mlflow.log_param("n_train", len(X_train))
+        mlflow.log_param("n_test", len(X_test))
+        mlflow.log_param("fraud_ratio_train", fraud_ratio)
+        mlflow.log_param("feature_names", FEATURE_NAMES)
 
-    print("\nÉvaluation sur le jeu de test...")
-    metrics, report = evaluate_model(model, X_test, y_test)
-    print(report)
-    print(f"  ROC AUC : {metrics['roc_auc']}")
+        print("\nÉvaluation sur le jeu de test...")
+        metrics, report = evaluate_model(model, X_test, y_test)
+        print(report)
+        print(f"  ROC AUC : {metrics['roc_auc']}")
+        # None n'est pas loggable comme métrique MLflow (roc_auc peut être None
+        # si y_test n'a qu'une seule classe, cf. evaluate_model) — filtré ici.
+        mlflow.log_metrics({k: v for k, v in metrics.items() if isinstance(v, (int, float))})
 
-    MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    joblib.dump(model, MODEL_PATH)
-    meta = {
-        "model_version": MODEL_VERSION,
-        "trained_at": datetime.now(timezone.utc).isoformat(),
-        "feature_names": FEATURE_NAMES,
-        "n_train": len(X_train),
-        "n_test": len(X_test),
-        "metrics": metrics,
-    }
-    META_PATH.write_text(json.dumps(meta, indent=2))
+        # Enregistre le modèle dans le Model Registry MLflow : chaque run crée
+        # une nouvelle version sous le même nom, l'historique complet reste
+        # consultable (contrairement au .pkl local qui écrase la version précédente).
+        mlflow.xgboost.log_model(model, artifact_path="model", registered_model_name="fraud-detector")
+
+        MODEL_DIR.mkdir(parents=True, exist_ok=True)
+        joblib.dump(model, MODEL_PATH)
+        meta = {
+            "model_version": MODEL_VERSION,
+            "trained_at": datetime.now(timezone.utc).isoformat(),
+            "feature_names": FEATURE_NAMES,
+            "n_train": len(X_train),
+            "n_test": len(X_test),
+            "metrics": metrics,
+            "mlflow_run_id": mlflow.active_run().info.run_id,
+        }
+        META_PATH.write_text(json.dumps(meta, indent=2))
 
     print(f"\n[OK] Modèle sauvegardé : {MODEL_PATH}")
     print(f"[OK] Métadonnées sauvegardées : {META_PATH}")
+    print(f"[OK] Run MLflow tracé : {MLFLOW_TRACKING_URI}")
     print(f"\nPour l'activer dans le scorer : export SCORING_ENGINE=ml")
 
 

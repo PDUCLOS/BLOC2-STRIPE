@@ -253,6 +253,132 @@ services:
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────
+  # MLflow — tracking des runs d'entraînement + registre de modèles
+  # ─────────────────────────────────────────────────────────
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.14.1
+    container_name: stripe-mlflow
+    ports:
+      # Host 5001 : le port 5000 est souvent pris par AirPlay Receiver sur macOS
+      # (Réglages Système > Général > AirDrop et Handoff, à désactiver si besoin
+      # de libérer 5000). Le conteneur écoute toujours sur 5000 en interne.
+      - "5001:5000"
+    volumes:
+      - mlflow-data:/mlflow
+    # Backend SQLite + artefacts sur disque : suffisant pour une démo mono-nœud,
+    # pas destiné à supporter des écritures concurrentes à l'échelle (en prod :
+    # backend Postgres partagé + artifact store S3/GCS).
+    #
+    # --serve-artifacts + --artifacts-destination (plutôt que --default-artifact-root
+    # seul) : les clients (host macOS ou autres conteneurs) uploadent/téléchargent
+    # les artefacts via l'API HTTP du serveur (URIs mlflow-artifacts:/...) au lieu
+    # d'écrire directement sur le chemin /mlflow — qui n'existe que DANS ce
+    # conteneur. Sans ça, un client hors conteneur plante avec "Read-only file
+    # system: /mlflow" en essayant d'écrire sur un chemin qui n'est pas le sien.
+    command: >
+      mlflow server
+      --backend-store-uri sqlite:////mlflow/mlflow.db
+      --artifacts-destination /mlflow/artifacts
+      --serve-artifacts
+      --host 0.0.0.0
+      --port 5000
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # ML Monitor — Evidently (drift + perf) + déclenchement auto du réentraînement
+  # ─────────────────────────────────────────────────────────
+  ml-monitor:
+    build:
+      context: .
+      dockerfile: ml/Dockerfile
+    image: stripe-ml-monitor:latest
+    container_name: stripe-ml-monitor
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      mlflow:
+        condition: service_healthy
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DB: ${PG_DB:-stripe_oltp}
+      PG_USER: ${PG_USER:-stripe_app}
+      PG_PASSWORD: ${PG_PASSWORD:?must be set in .env}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_USER: ${MONGO_USER:-admin}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?must be set in .env}
+      MONGO_DB: ${MONGO_DB:-stripe_nosql}
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      # Intervalle entre 2 checks de drift/performance — assez court pour la démo,
+      # à espacer largement en prod (ex. toutes les heures).
+      ML_MONITOR_INTERVAL_SECONDS: ${ML_MONITOR_INTERVAL_SECONDS:-120}
+      ML_DRIFT_THRESHOLD: ${ML_DRIFT_THRESHOLD:-0.3}
+      ML_MIN_RECALL: ${ML_MIN_RECALL:-0.7}
+    volumes:
+      # Le scorer (producers/flink_like_job.py) tourne sur le host via venv,
+      # pas dans Docker — ce bind mount fait pointer les deux sur le même
+      # fichier .pkl pour qu'un réentraînement déclenché ici soit effectivement
+      # celui que le scorer host chargera à son prochain démarrage.
+      - ./ml/models:/app/ml/models
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # Apache Airflow — OPTIONNEL, profil "airflow"
+  # Orchestration du batch ETL Snowflake (dags/stripe_daily_etl.py), en
+  # remplacement du script cron. Profil optionnel (comme Flink) car le mode
+  # "standalone" reste gourmand en mémoire pour ce qu'il orchestre ici — deux
+  # tâches BashOperator, pas besoin d'un cluster Airflow complet pour la démo.
+  # ─────────────────────────────────────────────────────────
+  airflow:
+    profiles: ["airflow"]
+    image: apache/airflow:2.9.3-python3.11
+    container_name: stripe-airflow
+    ports:
+      # Host 8090 : 8080 est déjà pris par un autre stack Airflow sur cette machine.
+      - "8090:8080"
+    environment:
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      # _PIP_ADDITIONAL_REQUIREMENTS : mécanisme officiel pour du dev/démo
+      # uniquement (réinstalle à chaque démarrage) — pas fait pour la prod, où
+      # on construirait une image Airflow dédiée avec ces deps figées au build.
+      _PIP_ADDITIONAL_REQUIREMENTS: "psycopg2-binary==2.9.9 snowflake-connector-python==3.6.0 python-dotenv==1.0.0"
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DB: ${PG_DB:-stripe_oltp}
+      PG_USER: ${PG_USER:-stripe_app}
+      PG_PASSWORD: ${PG_PASSWORD:?must be set in .env}
+      SNOWFLAKE_ACCOUNT: ${SNOWFLAKE_ACCOUNT:-}
+      SNOWFLAKE_USER: ${SNOWFLAKE_USER:-}
+      SNOWFLAKE_PASSWORD: ${SNOWFLAKE_PASSWORD:-}
+      SNOWFLAKE_WAREHOUSE: ${SNOWFLAKE_WAREHOUSE:-STRIPE_WH}
+      SNOWFLAKE_DB: ${SNOWFLAKE_DB:-STRIPE_DWH}
+      SNOWFLAKE_SCHEMA: ${SNOWFLAKE_SCHEMA:-PROD}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./etl:/opt/airflow/etl
+      # etl/*.py font `import _env` en s'attendant à le trouver à la racine
+      # du projet (parent.parent du fichier) — ici /opt/airflow, pour matcher
+      # la structure attendue sans dupliquer la logique de chargement du .env.
+      - ./_env.py:/opt/airflow/_env.py
+      - airflow-data:/opt/airflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # standalone : initialise la DB (SQLite), crée un admin, lance
+    # webserver+scheduler+triggerer dans un seul process — suffisant pour une
+    # démo mono-nœud, pas pour un vrai déploiement multi-worker.
+    command: standalone
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
   # Apache Flink (TaskManager) — OPTIONNEL, profil "flink"
   # ─────────────────────────────────────────────────────────
   flink-taskmanager:
@@ -297,3 +423,5 @@ volumes:
   kafka-data:
   debezium-data:
   flink-data:
+  mlflow-data:
+  airflow-data:

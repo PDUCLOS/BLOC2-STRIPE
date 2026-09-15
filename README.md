@@ -1,6 +1,6 @@
 # Stripe Polyglot — Démo locale
 
-> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL (OLTP) · MongoDB (logs/features/alertes) · Kafka + Debezium (CDC) · Redis (feature store online) · Job de scoring fraude temps réel · Streamlit (dashboard) · Snowflake (OLAP).
+> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL (OLTP) · MongoDB (logs/features/alertes) · Kafka + Debezium (CDC) · Redis (feature store online) · Scoring fraude temps réel (règles + XGBoost) · MLflow + Evidently (tracking/monitoring ML) · Streamlit (dashboard) · Snowflake (OLAP) · Airflow (orchestration batch).
 
 **Commentaire précis** : ce README sert de script de démonstration technique. L'ordre des sections suit le parcours réel d'exécution (quickstart -> pipeline live -> vérifications -> tests).
 
@@ -29,13 +29,18 @@ open http://localhost:8501
 ```
 
 Le script `demo.sh` :
-- démarre les 5 services Docker (Postgres, Mongo, Kafka, Debezium, Redis)
+- démarre les services Docker infra (Postgres, Mongo, Kafka, Debezium, Redis, MLflow)
 - déploie le connecteur Debezium
 - insère le seed (200 merchants, 5000 customers)
-- lance le flink-like job (scoring fraude temps réel)
+- lance le flink-like job (scoring fraude temps réel — règles par défaut, `SCORING_ENGINE=ml` après `make ml-train`)
 - lance le consumer Kafka→Mongo
 - lance le dashboard Streamlit
 - lance le producer de transactions en continu
+
+Pour activer le scoring ML complet (modèle entraîné + monitoring Evidently +
+réentraînement auto) : `make ml-train` puis relancer le job de scoring avec
+`SCORING_ENGINE=ml` et démarrer `docker compose up -d ml-monitor` — détaillé
+dans `docs/ML_INTEGRATION_STRATEGY.md`.
 
 **Commentaire précis** : l'intérêt principal de `demo.sh` est de garantir un démarrage reproductible pour la soutenance, sans oublis de dépendances intermédiaires.
 
@@ -64,9 +69,13 @@ make seed              # 200 merchants, 5000 customers, ~8000 PM
 
 # 6. Lance les composants applicatifs dans 4 terminaux séparés pour suivre chaque flux indépendamment
 make producer          # 5 txn/s, 5% fraude (terminal 1)
-./venv/bin/python -u producers/flink_like_job.py    # scoring (terminal 2)
+./venv/bin/python -u producers/flink_like_job.py    # scoring (terminal 2) — SCORING_ENGINE=ml après make ml-train
 ./venv/bin/python -u producers/mongo_writer.py      # Kafka→Mongo (terminal 3)
 make dashboard         # Streamlit sur :8501 (terminal 4)
+
+# 7. (Optionnel) Entraîne et active le scoring ML
+make ml-train                          # entraîne XGBoost, trace le run dans MLflow
+docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
 ```
 
 ## URLs utiles (pour la démo)
@@ -74,9 +83,11 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 | Service | URL | Credentials |
 |---|---|---|
 | Streamlit Dashboard | http://localhost:8501 | — |
+| MLflow (tracking + registre de modèles) | http://localhost:5001 | — |
+| Airflow (si `docker compose --profile airflow up -d`) | http://localhost:8090 | admin / voir `docker logs stripe-airflow` |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
 | Kafka brokers | `localhost:9092` (Docker) / `localhost:29092` (host) | — |
-| PostgreSQL | `localhost:5432` | `stripe_app` / (voir .env) |
+| PostgreSQL | `localhost:5432` | `stripe_app` (ou `analytics_reader` lecture seule) / (voir .env) |
 | MongoDB | `localhost:27017` | `admin` / (voir .env) |
 | Redis | `localhost:6379` | (voir .env) |
 
@@ -130,7 +141,12 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
                        └──────────────────────┘
 
    ┌─────────────────────────────────────────────────────────────┐
-   │  Daily ETL (cron / Airflow) → Snowflake (dim_*, fact_*)     │
+   │  Airflow (DAG quotidien, 02:00 UTC) → Snowflake (dim_*, fact_*)│
+   └─────────────────────────────────────────────────────────────┘
+
+   ┌─────────────────────────────────────────────────────────────┐
+   │  ml/train_fraud_model.py → MLflow (tracking + registre)      │
+   │  ml-monitor (Evidently) → drift/perf → réentraînement auto   │
    └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -138,24 +154,29 @@ make dashboard         # Streamlit sur :8501 (terminal 4)
 
 ```
 .
-├── docker-compose.yml       # 6 services (Postgres, Mongo, Kafka, Debezium, Redis, Dashboard)
+├── docker-compose.yml       # 8 services par défaut (Postgres, Mongo, Kafka, Debezium, Redis,
+│                            #   Dashboard, MLflow, ml-monitor) + profils "flink"/"airflow"
 ├── Makefile                 # orchestration
 ├── demo.sh                  # script one-shot pour la démo
 ├── .env / .env.example      # config (gitignored .env)
-├── init/                    # DDL Postgres + init Mongo
+├── init/                    # DDL Postgres (+ rôle analytics_reader) + init Mongo
 ├── scripts/                 # topics Kafka, Debezium, utilitaires
 ├── seed/                    # seed initial (merchants, customers, PM)
 ├── producers/
 │   ├── transaction_producer.py    # INSERT continu de transactions
-│   ├── flink_like_job.py          # job scoring fraude (DataStream-style)
-│   └── mongo_writer.py            # Kafka→Mongo consumer
+│   ├── flink_like_job.py          # scoring fraude — règles ou modèle ML (SCORING_ENGINE)
+│   └── mongo_writer.py            # Kafka→Mongo consumer (+ ml_features)
+├── ml/                       # entraînement (make ml-train), inférence, monitoring (Evidently+MLflow)
+├── dags/                     # DAG Airflow (export quotidien Postgres → Snowflake)
 ├── dashboard/
-│   ├── app.py                 # app Streamlit (5 pages)
+│   ├── app.py                 # app Streamlit — 2 onglets : Vue d'ensemble + Performance ML
 │   └── Dockerfile             # image du service `dashboard` (port 8501)
 ├── etl/                      # export batch vers Snowflake
 ├── tests/
-│   └── test_e2e.py           # test end-to-end
-└── flink/                    # Dockerfile + requirements (PyFlink custom)
+│   ├── test_e2e.py           # test end-to-end (nécessite la stack Docker)
+│   └── test_ml_model.py      # tests du module ml/ (sans Docker)
+├── flink/                    # Dockerfile + requirements (PyFlink custom)
+└── docs/                     # PRESENTATION, ARCHITECTURE, sécurité, ML, OLAP, NoSQL
 ```
 
 ## Scénario de démo (3 minutes)

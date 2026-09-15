@@ -148,6 +148,31 @@ def main():
 
             count += 1
 
+            # ml_features — feature store offline consolidé (snapshot par client,
+            # pas un historique). C'est le point d'ancrage NoSQL du pipeline ML
+            # (cf. docs/ML_INTEGRATION_STRATEGY.md §2) : chaque transaction scorée
+            # met à jour l'état features le plus récent du client dans Mongo, que
+            # ml/train_fraud_model.py et un futur pipeline d'extraction batch
+            # peuvent relire sans repasser par Postgres.
+            customer_id = txn.get("customer_id")
+            if customer_id:
+                db.ml_features.update_one(
+                    {"customer_id": customer_id},
+                    {"$set": {
+                        "last_amount": txn.get("amount"),
+                        "last_currency": txn.get("currency"),
+                        "last_country": txn.get("ip_country"),
+                        "last_device_type": txn.get("device_type"),
+                        "velocity_1h": txn.get("velocity_1h"),
+                        "velocity_24h": txn.get("velocity_24h"),
+                        "last_fraud_score": txn.get("fraud_score"),
+                        "last_decision": txn.get("decision"),
+                        "last_model_version": txn.get("model_version"),
+                        "last_updated": now,
+                    }},
+                    upsert=True,
+                )
+
             # Si alerte, on écrit dans fraud_alerts
             if txn.get("decision") in ("review", "block"):
                 db.fraud_alerts.insert_one({

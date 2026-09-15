@@ -1,7 +1,7 @@
 # Stripe Polyglot — Architecture de détection de fraude en temps réel
 
 > Projet Bloc 2 — Certification Jedha Architecte en IA (RNCP 38777)
-> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Snowflake
+> Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Snowflake · Airflow · XGBoost · MLflow · Evidently
 
 ---
 
@@ -115,10 +115,27 @@ Construire une plateforme de paiement capable de **détecter les transactions fr
 │                       COUCHE ANALYTIQUE (batch)                       │
 │                                                                       │
 │   ┌─────────────┐    ETL    ┌─────────────────┐                      │
-│   │  Airflow /  │──────────▶│   Snowflake     │  OLAP — star schema  │
-│   │  cron bash  │ quotidien  │ (DWH compte     │  (dim_*, fact_*)     │
-│   │             │            │  trial AWS)     │  pour reporting BI   │
+│   │  Airflow    │──────────▶│   Snowflake     │  OLAP — star schema  │
+│   │  standalone │ quotidien  │ (DWH compte     │  (dim_*, fact_*)     │
+│   │  (profil)   │ 02:00 UTC  │  trial AWS)     │  pour reporting BI   │
 │   └─────────────┘            └─────────────────┘                      │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────────┐
+│                     COUCHE MACHINE LEARNING                          │
+│                                                                       │
+│   Redis (features live) + Postgres (historique + label vérité       │
+│   terrain) ──▶ ml/train_fraud_model.py (XGBoost) ──▶ MLflow          │
+│   (tracking + registre de modèles) ──▶ ml/models/*.pkl               │
+│   ──▶ chargé par le scorer si SCORING_ENGINE=ml (fallback rules      │
+│   automatique si pas encore entraîné)                                │
+│                                                                       │
+│   ml-monitor (Evidently, boucle continue) : compare la fenêtre       │
+│   courante à la référence d'entraînement (drift + recall live)       │
+│   ──▶ déclenche automatiquement un réentraînement si dérive          │
+│   ──▶ écrit dans MongoDB.ml_monitoring, lu par l'onglet              │
+│   "Performance ML" du dashboard                                      │
 │                                                                       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
@@ -228,7 +245,15 @@ stripe.public.transactions (Kafka source)
    └── Kafka sink → stripe.payments.events (toutes les txns scorées)
 ```
 
-**5 règles de scoring :**
+**Deux moteurs de scoring, sélectionnés par `SCORING_ENGINE` (env var) :**
+
+`SCORING_ENGINE=rules` (défaut) applique 5 règles statiques ; `SCORING_ENGINE=ml`
+charge le modèle XGBoost entraîné (`ml/train_fraud_model.py`, détaillé en
+§3.8) et **retombe automatiquement sur les règles** si aucun modèle n'a
+encore été entraîné (`ml/models/*.pkl` absent) — jamais de crash, juste un
+score toujours moins bon en attendant le premier `make ml-train`.
+
+**5 règles de scoring (moteur `rules`) :**
 
 | Règle | Trigger | Poids |
 |---|---|---|
@@ -238,7 +263,12 @@ stripe.public.transactions (Kafka source)
 | R4_velocity_1h | `velocity_1h > 10 txns/h` | +0.25 |
 | R5_velocity_24h | `velocity_24h > 50 txns/24h` | +0.15 |
 
-**Décision :**
+Chaque transaction scorée porte un champ `model_version` (`rule-based-v1` ou
+`xgboost-v1`) qui trace quel moteur a produit la décision — utile pour
+comparer les deux dans le dashboard (onglet "Performance ML") sans
+ambiguïté sur qui a scoré quoi.
+
+**Décision (identique quel que soit le moteur) :**
 - `score ≥ 0.85` → **block** (refuse la transaction à la source, intégration future avec PSP)
 - `score ∈ [0.6, 0.85[` → **review** (alerte au risk analyst, la transaction passe)
 - `score < 0.6` → **allow**
@@ -336,7 +366,28 @@ fact_transactions ──────── dim_merchants
 - Pour les dimensions (merchants, customers) : upsert (les nouvelles lignes s'ajoutent, les existantes se mettent à jour)
 - Pour la fact : insert-only (idempotent grâce à `txn_id UNIQUE`)
 
-**ETL déclenché par** : un DAG Airflow en prod (`dags/stripe_daily_etl.py`), ou un simple cron bash en démo (`make snowflake-export`).
+**ETL déclenché par** : le DAG Airflow (`dags/stripe_daily_etl.py`, cf. §3.8), planifié 02:00 UTC. Reste manuellement lançable via `make snowflake-export` même sans Airflow démarré (le DAG appelle exactement le même script, il ne fait qu'orchestrer/planifier).
+
+---
+
+### 3.8 MLflow + Evidently — entraînement, tracking et monitoring du modèle ML
+
+**Le problème que ça résout :** un modèle entraîné une fois et jamais revisité se dégrade avec le temps (les patterns de fraude évoluent, la distribution du trafic change). Il faut (1) savoir comparer les versions successives du modèle, et (2) détecter automatiquement quand le modèle en production décroche, plutôt que de s'en apercevoir a posteriori sur un incident.
+
+**MLflow — tracking + registre de modèles :**
+- `ml/train_fraud_model.py` ouvre un run MLflow à chaque entraînement (manuel `make ml-train`, ou automatique via ml-monitor) : hyperparamètres, métriques (precision/recall/f1/ROC AUC), et le modèle sérialisé sont tous tracés ensemble
+- Chaque run **enregistre une nouvelle version** du modèle `fraud-detector` dans le Model Registry — contrairement au fichier `.pkl` local (qui écrase la version précédente), l'historique complet reste consultable dans l'UI (`http://localhost:5001`)
+- Backend SQLite + artefacts servis via l'API HTTP du serveur (`--serve-artifacts`) : un client MLflow (host macOS ou conteneur) n'a jamais besoin d'accéder directement au système de fichiers du conteneur `mlflow`, tout passe par HTTP
+
+**Evidently — détection de drift, dans `ml/monitor.py` (service `ml-monitor`) :**
+- Boucle continue (toutes les `ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) : compare les features de la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes de transactions) à celles utilisées à l'entraînement (`DataDriftPreset`, `share_of_drifted_columns`)
+- Calcule en parallèle le recall du modèle actuel sur les données fraîches (vérité terrain = `is_fraud_pattern` du générateur) — un modèle peut ne montrer aucun drift de features et quand même décrocher en performance (concept drift), d'où les deux signaux, pas un seul
+- Si `drift_share > ML_DRIFT_THRESHOLD` (0.3 par défaut) OU `recall < ML_MIN_RECALL` (0.7 par défaut) : déclenche automatiquement `ml/train_fraud_model.py` — un cooldown (3× l'intervalle) évite de relancer un entraînement à chaque cycle tant que le problème persiste
+- Chaque cycle écrit un document dans `MongoDB.ml_monitoring` (statut, drift, performance, décision de réentraînement) — c'est ce que lit l'onglet "Performance ML" du dashboard
+
+**Limite assumée (documentée dans `ml/monitor.py`) :** le scorer déjà en cours d'exécution garde le modèle chargé en mémoire (`ml/scoring.py` le cache après le premier chargement) — un réentraînement écrase bien le `.pkl` sur disque, mais le scorer ne le recharge qu'à son prochain redémarrage, pas à chaud. Un vrai hot-reload (watcher de fichier) est listé comme amélioration plutôt qu'implémenté, pour ne pas ajouter d'I/O disque à chaque transaction scorée.
+
+**Pourquoi deux ports non-standards (5001, 8090) ?** MLflow écoute nativement sur 5000 et Airflow sur 8080, mais ces deux ports sont déjà pris par d'autres process sur une machine de dev typique (AirPlay Receiver macOS pour 5000, un autre stack Airflow local pour 8080 dans notre cas) — remappés côté host uniquement, les conteneurs communiquent toujours en interne sur leurs ports standards.
 
 ---
 
@@ -391,9 +442,58 @@ import _env  # noqa: F401
 
 `_env.py` est à la racine du projet, donc trouvable depuis n'importe quel sous-dossier. Il utilise `python-dotenv` si dispo, sinon fait du parsing manuel (gère quotes, commentaires). Plus fiable que 8 versions de la même boucle `for line in env_path.read_text().splitlines()` dispersées dans le code.
 
-### 4.8 Profil Docker Compose `flink` (optionnel)
+### 4.8 Profils Docker Compose `flink` et `airflow` (optionnels)
 
-Les services `flink-jobmanager` et `flink-taskmanager` sont déclarés dans le compose mais avec `profiles: ["flink"]`. Par défaut (sans le profil), ils ne démarrent pas — on économise ~2 Go de RAM et le build d'image cassé. Pour les activer en prod : `docker compose --profile flink up -d`.
+Les services `flink-jobmanager`/`flink-taskmanager` (`profiles: ["flink"]`) et
+`airflow` (`profiles: ["airflow"]`) ne démarrent pas par défaut avec `make up`
+— on économise leur empreinte mémoire (~2 Go pour Flink, le mode standalone
+Airflow n'est pas léger non plus) tant qu'on n'en a pas besoin. Activation :
+`docker compose --profile flink up -d` ou `docker compose --profile airflow up -d`.
+MLflow et ml-monitor, eux, sont dans le stack par défaut : plus légers, et
+au cœur du scoring temps réel dès que `SCORING_ENGINE=ml`.
+
+### 4.9 mongo/redis en volumes nommés (pas seulement Kafka, cf. §4.2)
+
+§4.2 documentait déjà ce fix pour Kafka. Le même problème est réapparu sur
+`mongo` et `redis` : leurs bind mounts (`./data/mongo`, `./data/redis`)
+pointaient vers un dossier du dépôt qui — sur ce poste — vit sur un montage
+Google Drive (FUSE), lequel ne supporte pas les verrous fichier POSIX que
+WiredTiger (moteur de stockage MongoDB) exige au démarrage
+(`Operation not permitted` sur `WiredTiger.wt`). Passés en volumes nommés
+(`mongo-data`, `redis-data`), gérés par Docker, le problème disparaît — même
+remède que Kafka, cause différente (Drive plutôt que virtiofs macOS).
+
+### 4.10 MLflow : artefacts servis en proxy HTTP, pas en accès disque direct
+
+`mlflow server --default-artifact-root /mlflow/artifacts` (sans
+`--serve-artifacts`) suppose que **le client** a aussi accès à ce chemin —
+vrai seulement si le client tourne dans le même conteneur. Un client externe
+(le script d'entraînement lancé depuis le host, ou depuis le conteneur
+`ml-monitor`) plante avec `Read-only file system: /mlflow` en essayant
+d'écrire sur un chemin qui n'existe que dans le conteneur `mlflow`. Fix :
+`--artifacts-destination` + `--serve-artifacts`, qui fait transiter les
+artefacts par l'API HTTP du serveur (URIs `mlflow-artifacts:/...`) —
+transparent pour n'importe quel client, où qu'il tourne.
+
+### 4.11 `PYTHONUNBUFFERED=1` sur le conteneur ml-monitor
+
+Sans cette variable, les `print()` de `ml/monitor.py` restaient coincés dans
+le buffer stdout de Python (non-tty en conteneur = buffering complet, pas
+ligne par ligne) — `docker logs` semblait montrer un service figé alors
+qu'il tournait et écrivait bien dans MongoDB. Symptôme classique de
+conteneur Python silencieux ; le fix est dans le Dockerfile (`ENV
+PYTHONUNBUFFERED=1`), pas dans le code applicatif.
+
+### 4.12 DAG Airflow : `snowflake_setup` volontairement absent du planning quotidien
+
+Premier réflexe : chaîner `snowflake_setup >> snowflake_export` dans le DAG.
+Mauvaise idée — `snowflake_setup.py` est un bootstrap **ponctuel** (créer le
+schéma une fois), pas une étape à rejouer chaque nuit, et il échoue
+bruyamment (`sys.exit(1)`) sans compte Snowflake réel configuré — ce qui est
+le comportement voulu pour un lancement manuel (`make snowflake-setup`),
+mais ferait échouer le DAG *tous les jours* en environnement démo. Le DAG
+n'orchestre que `snowflake_export` (qui, lui, a un vrai mode dry-run
+gracieux) ; la création du schéma reste une commande manuelle séparée.
 
 ---
 
@@ -479,22 +579,42 @@ make smoke
 
 ## 8. Limites assumées et axes d'amélioration
 
-### 8.1 Limites de la démo
+### 8.1 Ce qui était une limite et a été comblé depuis
+
+Ce projet a évolué après la première version de ce document ; ces points
+étaient listés comme limites et sont maintenant implémentés et testés en
+conditions réelles (stack Docker complète) :
+
+- ~~Modèle de scoring simple (5 règles statiques)~~ → **Modèle XGBoost réel**,
+  entraîné sur la vérité terrain du générateur, activable via `SCORING_ENGINE=ml`
+  avec fallback automatique sur les règles (§3.4, §3.8)
+- ~~Pas d'Airflow~~ → **DAG Airflow réel** (`dags/stripe_daily_etl.py`,
+  profil optionnel `airflow`), testé de bout en bout (§3.8, §4.12)
+- ~~Pas de tracking/monitoring du modèle~~ → **MLflow** (tracking + registre
+  de modèles) + **Evidently** (drift + performance live, réentraînement
+  automatique) — service `ml-monitor` (§3.8)
+- ~~`ml_features` (collection Mongo) documentée mais jamais écrite~~ →
+  alimentée en continu par `mongo_writer.py`, feature store offline réel
+
+### 8.2 Limites restantes de la démo
 
 - **Pas de vrai cluster Flink** : job Python "Flink-like" qui imite la logique DataStream. Causé par les bugs de build PyFlink sur ARM64 (numpy 1.21.4, JDK headers, ClassCastException [B).
-- **Modèle de scoring simple** : 5 règles statiques. En prod, on entraînerait un modèle supervisé (XGBoost, LightGBM) sur les `fraud_indicators.decision`.
-- **Pas d'Airflow** : juste un script `etl/load_snowflake.py`. En prod, DAG Airflow avec sensors sur la partition date.
-- **Pas de CI/CD** : pas de GitHub Actions, pas de tests unitaires pytest (uniquement un E2E).
+- **Pas de CI/CD** : pas de GitHub Actions, pas de tests unitaires pytest (uniquement des E2E : `tests/test_e2e.py`, `tests/test_ml_model.py`).
+- **Pas de hot-reload du modèle** : un réentraînement automatique écrase le `.pkl` sur disque, mais le scorer déjà lancé continue sur l'ancienne version en mémoire jusqu'à son prochain redémarrage (cf. §3.8).
+- **Airflow en mode standalone** (SQLite, SequentialExecutor, un seul process) : suffisant pour démontrer l'orchestration, pas dimensionné pour un vrai débit de DAGs concurrents.
+- **`analytics_reader`** limite l'accès en lecture à `payment_methods.fingerprint`, mais aucun rôle équivalent n'existe encore côté MongoDB (un seul utilisateur applicatif `stripe_app` avec `readWrite` complet).
+- **Snowflake reste en dry-run** sans compte trial réel configuré — le DAG et le script d'export tournent bout en bout, mais rien n'est physiquement chargé dans un warehouse tant que `SNOWFLAKE_ACCOUNT` n'est pas renseigné.
 
-### 8.2 Améliorations prioritaires
+### 8.3 Améliorations prioritaires restantes
 
-1. **Modèle ML** : remplacer le scoring rule-based par un modèle supervisé (entraîné sur les `fraud_indicators` réelles)
-2. **Vrai Flink en prod** : déployer le job PyFlink via Flink standalone (pas Docker) ou AWS Kinesis Data Analytics
-3. **Streaming Snowflake** : au lieu d'un ETL batch quotidien, Snowpipe pour ingérer en continu
-4. **Alerting** : PagerDuty / Slack quand `decision = block` et montant > seuil
-5. **A/B testing** : servir 2 versions du modèle (champ `model_version` déjà dans l'event), comparer en prod
-6. **Backfill** : rejouer l'historique sur un nouveau modèle pour mesurer l'amélioration
-7. **GDPR data subject access request** : endpoint API pour qu'un user demande toutes ses données
+1. **Vrai Flink en prod** : déployer le job PyFlink via Flink standalone (pas Docker) ou AWS Kinesis Data Analytics
+2. **Streaming Snowflake** : au lieu d'un ETL batch quotidien, Snowpipe pour ingérer en continu
+3. **Alerting** : PagerDuty / Slack quand `decision = block` et montant > seuil, ou quand ml-monitor détecte une dérive
+4. **A/B testing** : servir 2 versions du modèle en parallèle en comparant leurs `model_version` respectifs sur le même trafic (le mécanisme de traçage existe déjà, pas encore le routing différencié)
+5. **Backfill** : rejouer l'historique sur un nouveau modèle pour mesurer l'amélioration avant bascule complète
+6. **GDPR data subject access request** : endpoint API pour qu'un user demande toutes ses données
+7. **Hot-reload du modèle** dans le scorer (watcher de fichier ou polling du `mtime` du `.pkl`)
+8. **RBAC MongoDB** équivalent à `analytics_reader` côté Postgres
 
 ---
 
@@ -502,9 +622,11 @@ make smoke
 
 ```
 .
-├── docker-compose.yml            # 6 services actifs (Postgres, Mongo, Kafka, Debezium, Redis, Dashboard)
-│                                # + 2 services profil "flink" (JobManager, TaskManager)
-├── Makefile                      # orchestration (up/down/init/seed/producer/test)
+├── docker-compose.yml            # 8 services actifs par défaut (Postgres, Mongo, Kafka, Debezium,
+│                                  #   Redis, Dashboard, MLflow, ml-monitor)
+│                                  # + 3 services optionnels : profil "flink" (JobManager, TaskManager),
+│                                  #   profil "airflow" (orchestration ETL Snowflake)
+├── Makefile                      # orchestration (up/down/init/seed/producer/ml-train/test)
 ├── demo.sh                       # one-shot: démarre tout pour la vidéo
 ├── README.md                     # mode d'emploi complet
 │
@@ -513,13 +635,14 @@ make smoke
 ├── _env.py                       # helper .env loader partagé
 │
 ├── init/
-│   ├── postgres/01_ddl.sql      # schéma OLTP complet (6 tables, indexes, vues, trigger, publication)
+│   ├── postgres/01_ddl.sql      # schéma OLTP complet (6 tables, indexes, vues, trigger, publication,
+│   │                             #   rôles replication_user + analytics_reader)
 │   └── mongo/                   # collections + index + TTL + user app
 │
 ├── scripts/
 │   ├── init_env.sh              # génère .env avec secrets aléatoires
 │   ├── create_topics.sh         # topics Kafka applicatifs
-│   ├── postgres_init_roles.sh   # crée le replication_user
+│   ├── postgres_init_roles.sh   # crée replication_user + analytics_reader
 │   ├── deploy_debezium.sh       # POST le connector sur Kafka Connect
 │
 ├── seed/
@@ -527,29 +650,47 @@ make smoke
 │
 ├── producers/
 │   ├── transaction_producer.py  # INSERT continu de transactions (95% legit, 5% fraud)
-│   ├── flink_like_job.py        # job scoring fraud (Kafka→Redis→score→Kafka) + write-back PG
-│   └── mongo_writer.py          # consumer Kafka→Mongo (transaction_logs + fraud_alerts)
+│   ├── flink_like_job.py        # scoring fraud (Kafka→Redis→score[règles|ML]→Kafka) + write-back PG
+│   └── mongo_writer.py          # consumer Kafka→Mongo (transaction_logs, fraud_alerts, ml_features)
 │
 ├── flink/
 │   ├── Dockerfile               # image PyFlink custom (optionnelle, profil "flink")
 │   ├── requirements.txt
 │   └── fraud_scoring_job.py     # version PyFlink DataStream (référence prod)
 │
+├── ml/                           # NOUVEAU — entraînement, inférence, monitoring du modèle fraude
+│   ├── features.py               # feature engineering partagée entraînement/inférence
+│   ├── train_fraud_model.py      # entraîne XGBoost, trace le run dans MLflow (make ml-train)
+│   ├── scoring.py                # charge le modèle et prédit, utilisé par flink_like_job.py
+│   ├── monitor.py                # boucle Evidently (drift+perf) + réentraînement auto (service ml-monitor)
+│   ├── Dockerfile                # image du service ml-monitor
+│   └── models/                   # .pkl + .meta.json générés par make ml-train (gitignored)
+│
+├── dags/                         # NOUVEAU — orchestration Airflow
+│   └── stripe_daily_etl.py       # DAG quotidien (02:00 UTC) : export Postgres → Snowflake
+│
 ├── dashboard/
-│   ├── app.py                   # Streamlit 5 pages
+│   ├── app.py                   # Streamlit, 2 onglets : Vue d'ensemble + Performance ML
 │   └── Dockerfile               # image du service `dashboard` (port 8501)
 │
 ├── etl/
-│   ├── snowflake_setup.py       # crée warehouse + schéma
-│   └── load_snowflake.py        # MERGE upsert + INSERT fact
+│   ├── snowflake_setup.py       # crée warehouse + schéma (bootstrap manuel, PAS dans le DAG quotidien)
+│   └── load_snowflake.py        # MERGE upsert + INSERT fact (dry-run gracieux sans credentials)
 │
 ├── tests/
-│   └── test_e2e.py              # test bout-en-bout
+│   ├── test_e2e.py              # test bout-en-bout (Postgres/Redis/Mongo/pipeline live)
+│   └── test_ml_model.py         # tests du module ml/ (features, cycle modèle, fallback) — sans Docker
 │
 ├── config/
 │   └── debezium-connector.json  # template du connector CDC
 │
-└── docs/                        # (vide pour l'instant, à remplir)
+└── docs/
+    ├── ARCHITECTURE.md           # référence technique fichier par fichier
+    ├── PRESENTATION.md           # ce document — narratif complet du projet
+    ├── SECURITY_COMPLIANCE_PLAN.md    # sécurité, conformité, monitoring
+    ├── ML_INTEGRATION_STRATEGY.md     # stratégie ML détaillée (feature store, déploiement, monitoring)
+    ├── OLAP_SCHEMA_DESIGN.md          # star schema Snowflake, clustering, optimisation
+    └── NOSQL_DATA_MODEL.md            # schéma MongoDB, relations, stratégie d'indexation
 ```
 
 ---
@@ -592,8 +733,9 @@ make smoke
 | Latence INSERT → décision | < 1s | INSERT + chrono + voir l'alerte dans le dashboard |
 | Throughput | 5 txns/s (démo) → 1000+ en prod | Compteur dans Flink-like : `[1500 txns, 45 alerts] rate=4.8/s` |
 | Taux de fraude détecté | 100% des 5% injectés | Le test E2E insère 1 frauduleuse, génère 1 alerte |
-| Faux positifs | 0 (modèle simple) | Afficher la distribution des scores dans Streamlit |
-| Disponibilité | 5/5 services healthy | `make status` |
+| Performance modèle ML | F1 fraude 0.93, ROC AUC 0.985 (mesuré sur 810 txns réelles, split temporel 80/20) | `make ml-train`, ou onglet "Performance ML" du dashboard |
+| Drift détecté | 0% (stack fraîchement seedée) | Onglet "Performance ML" → carte "Drift (part colonnes)" |
+| Disponibilité | 5/5 services core healthy (+ MLflow, ml-monitor) | `make status` |
 | Conformité RGPD | TTL 90j automatique | `db.transaction_logs.getIndexes()` → voir le `expireAfterSeconds: 7776000` |
 
 ---
