@@ -17,7 +17,7 @@
 | P1.9 Chiffrage FinOps | ✅ ~3 100 $/mois prod, ~1 000 $ dev, 5 leviers | `docs/FINOPS.md` |
 | P2.10-11 Bugs `load_snowflake.py`, `MONGO_URI` | ✅ Corrigés avant cette mise à jour | — |
 | P2.12-14 `PRESENTATION.md` obsolète | ✅ Métriques, broker, onglets, moteur ML | `docs/PRESENTATION.md` |
-| P2.15 Documents Word | ✅ Régénérés sur l'implémentation réelle | `stripe_architecture_bloc2.docx`, `stripe_bloc2_competences.docx`, `generators/` |
+| P2.15 Documents Word | ✅ Régénérés sur l'implémentation réelle | `stripe_architecture_bloc2.docx`, `stripe_bloc2_competences.docx` (générés par script, hors dépôt) |
 | Nouveau : `anonymize_customer()` documentée mais absente | ✅ Implémentée | `init/postgres/02_rgpd.sql` |
 
 Les sections ci-dessous sont l'audit d'origine, conservé pour la traçabilité.

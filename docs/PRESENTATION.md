@@ -322,7 +322,7 @@ Trois raisons :
 **Pourquoi Streamlit (et pas Grafana ou un front React) ?**
 Pour une démo, Streamlit est imbattable : Python pur, auto-refresh, `st.metric()` pour les KPIs, intégration native Plotly. Pour de la prod BI, on passerait à Grafana (avec source Kafka/Postgres/Redis) ou à un front React.
 
-**Accès protégé par login** (hash SHA-256 du mot de passe dans `.env`, anti-bruteforce), puis **2 onglets** (`dashboard/app.py`) :
+**Accès protégé par login** (hash SHA-256 du mot de passe dans `.env`, anti-bruteforce) — connexion de démo sur http://localhost:8501 : **`admin` / `Bloc2-Demo-2026`** — puis **2 onglets** (`dashboard/app.py`) :
 
 | Onglet | Données (fonction → source) | Use case |
 |---|---|---|
@@ -737,7 +737,7 @@ conditions réelles (stack Docker complète) :
 | Latence INSERT → décision | < 1s | INSERT + chrono + voir l'alerte dans le dashboard |
 | Throughput | 5 txns/s (démo) → 1000+ en prod | Compteur dans Flink-like : `[1500 txns, 45 alerts] rate=4.8/s` |
 | Détection d'une fraude évidente | Le test E2E insère une transaction à 1 500 € depuis un pays à risque : score ≥ 0,85, `block` et ligne `fraud_indicators` vérifiés | `make test` |
-| Performance **servie** du modèle (live) | Précision 0,93 · rappel 0,96 sur 13 minutes de trafic (1 225 VP, 92 FP, 45 FN — 15/09/2026, 17:00-17:12 UTC) | `queries/postgres_oltp.sql` §3, onglet "Performance ML" |
+| Performance **servie** du modèle (live) | Précision 0,93 · rappel 0,96 sur 13 minutes de trafic en régime établi (1 225 VP, 92 FP, 45 FN — 15/09/2026, 17:00-17:12 UTC, première minute après redémarrage exclue : 0,82). La requête `queries/postgres_oltp.sql` §3 mesure sur 24 h glissantes et donne donc un chiffre différent selon l'historique | Même logique que §3 avec un filtre par minute, onglet "Performance ML" |
 | Performance **offline** du dernier entraînement | Varie à chaque réentraînement automatique : lire `ml/models/fraud_xgboost-v1.meta.json` (au 15/09 17:10 : précision 0,77, rappel 0,97, AUC 0,99 sur 21 744 transactions de test) | `make ml-train`, MLflow http://localhost:5001 |
 | Drift détecté | 0% (stack fraîchement seedée) | Onglet "Performance ML" → carte "Drift (part colonnes)" |
 | Disponibilité | 5/5 services core healthy (+ MLflow, ml-monitor) | `make status` |

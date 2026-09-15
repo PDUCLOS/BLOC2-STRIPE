@@ -92,10 +92,11 @@ authentifié.
 
 | Mécanisme | Implémentation |
 |---|---|
-| Stockage du mot de passe | Jamais en clair — seul `SHA-256(mot de passe)` vit dans `.env` (`DASHBOARD_PASSWORD_HASH`), généré par `make init-env` (`scripts/init_env.sh`) qui affiche le mot de passe en clair **une seule fois**, à la génération |
+| Stockage du mot de passe | Jamais en clair — seul `SHA-256(mot de passe)` vit dans `.env` (`DASHBOARD_PASSWORD_HASH`), écrit par `make init-env` (`scripts/init_env.sh`) et transmis au conteneur par `docker-compose.yml` |
 | Comparaison | `hmac.compare_digest` (temps constant) sur le login et le hash, pour ne pas fuiter d'information via le timing de réponse |
 | Anti-bruteforce | Verrouillage temporaire après `DASHBOARD_MAX_LOGIN_ATTEMPTS` (5 par défaut) échecs, pendant `DASHBOARD_LOCKOUT_SECONDS` (60s) — compteur en `st.session_state`, donc par session navigateur, pas persistant côté serveur |
 | Portée | Un seul compte de démo (`DASHBOARD_USERNAME=admin`) — pas de RBAC multi-utilisateurs ; en production, remplacer par un IdP (OAuth2/OIDC) devant un reverse proxy plutôt qu'une authentification applicative maison |
+| Identifiants de démo publiés | `admin` / `Bloc2-Demo-2026` figurent volontairement dans la présentation : le dashboard n'écoute que sur `localhost` et n'affiche que des données synthétiques. Hors démo, `DASHBOARD_PASSWORD=… make init-env` impose un autre mot de passe ; en cible AWS, le hash vient de Secrets Manager (`terraform/modules/security`) |
 
 ---
 

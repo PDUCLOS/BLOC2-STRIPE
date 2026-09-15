@@ -53,7 +53,7 @@ dans `docs/ML_INTEGRATION_STRATEGY.md`.
 
 ```bash
 # 1. Initialise l'environnement local et génère les secrets de base utilisés par les services
-make init-env          # génère .env avec des secrets aléatoires
+make init-env          # génère .env (secrets aléatoires + login démo du dashboard)
 
 # 2. Installe les dépendances Python dans un venv isolé pour éviter de polluer le système
 make install
@@ -87,7 +87,7 @@ docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
 
 | Service | URL | Credentials |
 |---|---|---|
-| Streamlit Dashboard | http://localhost:8501 | — |
+| Streamlit Dashboard | http://localhost:8501 | admin / Bloc2-Demo-2026 (démo locale) |
 | MLflow (tracking + registre de modèles) | http://localhost:5001 | — |
 | Airflow (si `docker compose --profile airflow up -d`) | http://localhost:8090 | admin / voir `docker logs stripe-airflow` |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
@@ -200,7 +200,7 @@ docker compose up -d ml-monitor        # drift Evidently + réentraînement auto
    - Ouvrir `stripe.fraud.alerts` pour illustrer les cas bloqués et les alertes métier.
    - Contrôler Redis pour prouver que les features temps réel sont mises à jour en parallèle du scoring.
 5. **Dashboard (1min)** : basculer sur http://localhost:8501 pour relier les données techniques à une lecture métier.
-   - Écran de login : l'accès au dashboard est protégé (hash du mot de passe dans `.env`, blocage après plusieurs échecs).
+   - Écran de login : se connecter avec `admin` / `Bloc2-Demo-2026` (identifiants de démo locale ; seul le hash SHA-256 est dans `.env`, blocage après 5 échecs).
    - Onglet Vue d'ensemble : KPIs temps réel, transactions suspectes, alertes consolidées depuis MongoDB.
    - Onglet Performance ML : dérive, précision/rappel servis, comparaison règles vs XGBoost.
 6. **Test E2E (15s)** : `make test` pour montrer que le parcours complet est vérifiable automatiquement.

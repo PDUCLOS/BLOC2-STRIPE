@@ -109,7 +109,7 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 
 | Service | URL | Credentials |
 |---|---|---|
-| Streamlit Dashboard | http://localhost:8501 | — |
+| Streamlit Dashboard | http://localhost:8501 | admin / Bloc2-Demo-2026 (démo locale) |
 | MLflow (tracking + registre) | http://localhost:5001 | — |
 | Airflow (si profil `airflow`) | http://localhost:8090 | admin / généré au 1er démarrage (`docker logs stripe-airflow`) |
 | Kafka Connect (Debezium) | http://localhost:8083/connectors | — |
@@ -988,7 +988,7 @@ CREATE INDEX idx_xxx ON table_name (column);
 | Commande | Rôle |
 |---|---|
 | `make init` | Bootstrap complet : `.env` + venv + deps + Docker + topics + Debezium |
-| `make init-env` | Génère `.env` avec secrets aléatoires |
+| `make init-env` | Génère `.env` : secrets aléatoires + hash du login démo du dashboard |
 | `make install` | Installe deps Python dans `venv/` |
 | `make up` | Démarre la stack Docker |
 | `make down` | Arrête (volumes conservés) |

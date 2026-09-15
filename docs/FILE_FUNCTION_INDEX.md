@@ -239,4 +239,4 @@ Validé (`make tf-validate`), jamais appliqué. Détail : [terraform/README.md](
 - [`presentation/stripe_code_structure.drawio`](../presentation/stripe_code_structure.drawio) — ce document, en version visuelle (fichier → fonctions → imports)
 - [`presentation/stripe_erd_oltp.drawio`](../presentation/stripe_erd_oltp.drawio) — schéma Postgres
 - [`presentation/stripe_mongodb_structure.drawio`](../presentation/stripe_mongodb_structure.drawio) — schéma MongoDB
-- [`presentation/stripe_aws_cible.drawio`](../presentation/stripe_aws_cible.drawio) — architecture physique de la cible AWS, fidèle à `terraform/envs/prod` (généré par `presentation/generators/gen_aws_drawio.py`)
+- [`presentation/stripe_aws_cible.drawio`](../presentation/stripe_aws_cible.drawio) — architecture physique de la cible AWS, fidèle à `terraform/envs/prod` (généré par script, régénéré à chaque évolution)
