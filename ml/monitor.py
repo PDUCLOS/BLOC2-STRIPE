@@ -7,8 +7,11 @@ de référence (données d'entraînement) à la fenêtre courante (transactions
 récentes) sur deux axes :
 - Data drift (Evidently) : les features en entrée ont-elles changé de
   distribution par rapport à ce que le modèle a vu à l'entraînement ?
-- Performance : le modèle actuellement en production détecte-t-il encore
-  correctement la fraude sur les données fraîches (recall) ?
+- Performance servie (recall ET precision) : relit ce que le scorer live a
+  RÉELLEMENT décidé (MongoDB), pas une resimulation — un modèle qui bloque
+  presque tout aurait un excellent recall en masquant un effondrement de
+  precision (cas réel rencontré : recall 0.98, precision tombée à ~0.30
+  suite à une vélocité Redis désynchronisée du calcul SQL d'entraînement).
 
 Si l'un des deux seuils est franchi, relance ml/train_fraud_model.py — le
 nouveau modèle écrase ml/models/fraud_xgboost-v1.pkl et devient actif au
@@ -16,10 +19,11 @@ prochain chargement (cf. limite documentée en fin de fichier).
 
 Usage : python -m ml.monitor  (tourne dans le service Docker ml-monitor)
 """
+import json
 import os
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -51,6 +55,12 @@ INTERVAL_SECONDS = int(os.environ.get("ML_MONITOR_INTERVAL_SECONDS", 120))
 WINDOW_MINUTES = int(os.environ.get("ML_MONITOR_WINDOW_MINUTES", 30))
 DRIFT_THRESHOLD = float(os.environ.get("ML_DRIFT_THRESHOLD", 0.3))
 MIN_RECALL = float(os.environ.get("ML_MIN_RECALL", 0.7))
+# Recall seul ne suffit pas : un modèle qui bloque presque tout aurait un
+# recall proche de 1.0 en flaguant massivement des transactions légitimes
+# (faux positifs) — cas réel observé en trafic continu (precision tombée à
+# ~0.29 avec un recall resté à ~0.98). Sans ce seuil, ce genre de dérive ne
+# déclenchait jamais de réentraînement.
+MIN_PRECISION = float(os.environ.get("ML_MIN_PRECISION", 0.5))
 # Évite de relancer un entraînement à chaque cycle tant que le problème
 # détecté persiste (ex. drift qui dure plusieurs cycles) — laisse le temps
 # à un run précédent de se refléter avant d'en redéclencher un autre.
@@ -90,24 +100,70 @@ def compute_drift(X_reference, X_current):
     }
 
 
-def compute_live_performance(model, X_current, y_current):
-    """Applique le modèle actuel aux données courantes et calcule precision/recall/f1.
+def _parse_is_fraud(payload):
+    """Extrait metadata.is_fraud_pattern d'un payload transaction_logs.
+
+    `metadata` arrive parfois en dict natif, parfois en chaîne JSON brute
+    selon le chemin d'écriture (Debezium peut sérialiser une colonne JSONB
+    en texte dans l'event CDC) — les deux formes sont vues en pratique,
+    donc gérées explicitement plutôt que de supposer l'une ou l'autre.
+    """
+    md = payload.get("metadata")
+    if isinstance(md, str):
+        try:
+            md = json.loads(md)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    if not isinstance(md, dict):
+        return None
+    return md.get("is_fraud_pattern")
+
+
+def compute_served_performance(db, window_minutes):
+    """Precision/recall/f1 sur ce qui a RÉELLEMENT été décidé en production.
+
+    Différence critique avec une évaluation "shadow" (appliquer le modèle à
+    des features recalculées après coup) : ici on relit `fraud_score` et
+    `decision` tels qu'écrits par le scorer live dans MongoDB
+    (transaction_logs), qui reflète l'état réel des features au moment du
+    scoring (velocity Redis incluse) — pas une resimulation via une requête
+    SQL qui, elle, ne voit jamais Redis et peut donc manquer un dérapage
+    purement côté feature store online (cas réel rencontré : velocity_1h
+    Redis ~2x supérieure à la vélocité recalculée en SQL après des
+    redémarrages répétés du scorer, precision live tombée à ~30% sans que
+    la version "shadow" de ce contrôle ne s'en aperçoive).
 
     Args:
-        model: Modèle XGBoost chargé depuis disque.
-        X_current, y_current: Features et labels (vérité terrain) de la fenêtre courante.
+        db: Connexion MongoDB (get_mongo_db()).
+        window_minutes (int): Fenêtre glissante à analyser.
 
     Returns:
-        dict: precision, recall, f1 — mesure la capacité du modèle EN PRODUCTION
-        (pas au moment de son entraînement) à détecter la fraude sur des
-        données fraîches, ce qui capture la dégradation dans le temps
-        (concept drift), pas seulement le drift des features en entrée.
+        dict | None: precision, recall, f1, n — ou None si pas assez de
+        données servies avec vérité terrain connue sur la fenêtre.
     """
-    y_pred = (model.predict_proba(X_current)[:, 1] >= 0.5).astype(int)
+    since = datetime.now(timezone.utc) - timedelta(minutes=window_minutes)
+    docs = list(db.transaction_logs.find({
+        "payload.model_version": MODEL_VERSION,
+        "created_at": {"$gte": since},
+    }))
+
+    y_true, y_pred = [], []
+    for d in docs:
+        payload = d.get("payload", {})
+        truth = _parse_is_fraud(payload)
+        if truth is None:
+            continue
+        y_true.append(bool(truth))
+        y_pred.append(payload.get("decision") == "block")
+
+    if len(y_true) < MIN_CURRENT_ROWS:
+        return None
+
     return {
-        "precision": float(precision_score(y_current, y_pred, zero_division=0)),
-        "recall": float(recall_score(y_current, y_pred, zero_division=0)),
-        "f1": float(f1_score(y_current, y_pred, zero_division=0)),
+        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "n": len(y_true),
     }
 
 
@@ -145,18 +201,25 @@ def check_once(db, last_retrain_at):
     doc["n_reference"] = len(X_ref_train)
     doc["n_current"] = len(X_cur)
 
-    performance = None
-    if TRAINED_MODEL_PATH.exists():
-        import joblib
-        model = joblib.load(TRAINED_MODEL_PATH)
-        performance = compute_live_performance(model, X_cur, y_cur)
+    # Performance = ce qui a RÉELLEMENT été servi (Mongo), pas une resimulation
+    # SQL du modèle — cf. docstring de compute_served_performance(). Le modèle
+    # n'a même pas besoin d'être rechargé ici : on ne fait que lire l'historique
+    # des décisions déjà prises par le scorer live.
+    performance = compute_served_performance(db, WINDOW_MINUTES)
+    if performance is not None:
         doc["performance"] = performance
+    elif not TRAINED_MODEL_PATH.exists():
+        doc["performance_skipped"] = "aucun modèle entraîné pour l'instant"
+    else:
+        doc["performance_skipped"] = f"pas assez de transactions servies avec model_version={MODEL_VERSION} sur la fenêtre"
 
     reasons = []
     if drift["drift_share"] > DRIFT_THRESHOLD:
         reasons.append(f"drift_share={drift['drift_share']:.2f} > seuil {DRIFT_THRESHOLD}")
     if performance is not None and performance["recall"] < MIN_RECALL:
         reasons.append(f"recall={performance['recall']:.2f} < seuil {MIN_RECALL}")
+    if performance is not None and performance["precision"] < MIN_PRECISION:
+        reasons.append(f"precision={performance['precision']:.2f} < seuil {MIN_PRECISION}")
     if performance is None:
         reasons.append("aucun modèle entraîné pour l'instant")
 

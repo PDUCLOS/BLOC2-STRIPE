@@ -322,6 +322,9 @@ services:
       ML_MONITOR_INTERVAL_SECONDS: ${ML_MONITOR_INTERVAL_SECONDS:-120}
       ML_DRIFT_THRESHOLD: ${ML_DRIFT_THRESHOLD:-0.3}
       ML_MIN_RECALL: ${ML_MIN_RECALL:-0.7}
+      # Le recall seul ne détecte pas un modèle qui sur-flag (beaucoup de faux
+      # positifs, recall élevé quand même) — cf. ml/monitor.py.
+      ML_MIN_PRECISION: ${ML_MIN_PRECISION:-0.5}
     volumes:
       # Le scorer (producers/flink_like_job.py) tourne sur le host via venv,
       # pas dans Docker — ce bind mount fait pointer les deux sur le même

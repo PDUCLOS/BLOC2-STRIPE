@@ -628,11 +628,16 @@ with tab_ml:
         drift = latest.get("drift") or {}
         perf = latest.get("performance") or {}
 
-        col1, col2, col3, col4 = st.columns(4)
+        col1, col2, col3, col4, col5 = st.columns(5)
         col1.metric("Statut", status.upper())
         col2.metric("Drift (part colonnes)", f"{drift.get('drift_share', 0):.2f}")
         col3.metric("Recall live", f"{perf['recall']:.2f}" if perf else "—")
-        col4.metric("Version modèle", latest.get("model_version", "—"))
+        # La precision seule révèle un problème que le recall seul masque :
+        # un modèle qui bloque presque tout aurait un excellent recall tout
+        # en générant énormément de faux positifs — cas réel observé
+        # (recall 0.98, precision tombée à 0.29 en trafic continu).
+        col4.metric("Precision live", f"{perf['precision']:.2f}" if perf else "—")
+        col5.metric("Version modèle", latest.get("model_version", "—"))
 
         if latest.get("alert_reasons"):
             st.warning("Alerte déclenchée : " + " ; ".join(latest["alert_reasons"]))
@@ -646,7 +651,7 @@ with tab_ml:
 
     st.divider()
 
-    st.subheader("Évolution drift / recall dans le temps")
+    st.subheader("Évolution drift / recall / precision dans le temps")
     history = ml_monitoring_history(50)
     if history:
         rows = []
@@ -657,6 +662,7 @@ with tab_ml:
                 "checked_at": h.get("checked_at"),
                 "drift_share": drift_h.get("drift_share"),
                 "recall": perf_h.get("recall"),
+                "precision": perf_h.get("precision"),
                 "retrain": bool(h.get("retrain_triggered")),
             })
         df_hist = pd.DataFrame(rows)
@@ -668,6 +674,10 @@ with tab_ml:
         fig.add_trace(go.Scatter(
             x=df_hist["checked_at"], y=df_hist["recall"],
             name="Recall live", line=dict(color="#635BFF", width=2)
+        ))
+        fig.add_trace(go.Scatter(
+            x=df_hist["checked_at"], y=df_hist["precision"],
+            name="Precision live", line=dict(color="#ff4444", width=2, dash="dot")
         ))
         retrains = df_hist[df_hist["retrain"]]
         if not retrains.empty:
