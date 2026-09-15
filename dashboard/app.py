@@ -107,8 +107,9 @@ def require_login():
 
     if not DASHBOARD_PASSWORD_HASH:
         st.error(
-            "Authentification non configurée : DASHBOARD_PASSWORD_HASH est vide dans .env.\n\n"
-            "Lance `make init-env` (génère un mot de passe aléatoire et affiche son hash une fois)."
+            "Authentification non configurée : DASHBOARD_PASSWORD_HASH est vide.\n\n"
+            "Lance `make init-env` (écrit le hash dans .env), puis, pour le conteneur, "
+            "`docker compose up -d dashboard` (docker-compose.yml transmet les variables DASHBOARD_*)."
         )
         st.stop()
 

@@ -51,7 +51,11 @@ jobs:
           EOF
 
       - name: Validité docker-compose.yml
-        run: docker compose config -q
+        # docker-compose.yml exige PG_PASSWORD, DASHBOARD_PASSWORD_HASH… (syntaxe ${VAR:?}) :
+        # on génère un .env jetable avant de valider l'interpolation.
+        run: |
+          bash scripts/init_env.sh
+          docker compose config -q
 
   # ───────────────────────────────────────────────────────────────────────
   # Infrastructure as Code — vérifie que terraform/ est syntaxiquement et

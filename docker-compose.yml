@@ -199,6 +199,13 @@ services:
       REDIS_PORT: 6379
       REDIS_PASSWORD: ${REDIS_PASSWORD:?must be set in .env}
       FRAUD_SCORE_THRESHOLD: ${FRAUD_SCORE_THRESHOLD:-0.85}
+      # Authentification (dashboard/app.py require_login()). Sans ces variables
+      # le conteneur refuse toute connexion (échec fermé) : le .env n'est pas
+      # copié dans l'image, il faut donc les transmettre explicitement.
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME:-admin}
+      DASHBOARD_PASSWORD_HASH: ${DASHBOARD_PASSWORD_HASH:?must be set in .env (make init-env)}
+      DASHBOARD_MAX_LOGIN_ATTEMPTS: ${DASHBOARD_MAX_LOGIN_ATTEMPTS:-5}
+      DASHBOARD_LOCKOUT_SECONDS: ${DASHBOARD_LOCKOUT_SECONDS:-60}
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────

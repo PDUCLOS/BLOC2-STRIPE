@@ -35,10 +35,15 @@ for k, v in replacements.items():
     # Remplace SEULEMENT les valeurs vides après le =
     content = re.sub(rf"^{re.escape(k)}$", v, content, flags=re.MULTILINE)
 
-# Mot de passe dashboard : généré en clair pour affichage UNIQUE ici, mais
-# seul son hash SHA-256 est écrit dans .env (dashboard/app.py ne compare
-# jamais de mot de passe en clair, cf. require_login()).
-dashboard_password = secrets.token_urlsafe(12)
+# Mot de passe dashboard : seul son hash SHA-256 est écrit dans .env
+# (dashboard/app.py ne compare jamais de mot de passe en clair, cf. require_login()).
+# Par défaut, identifiants de DÉMO LOCALE documentés dans la présentation
+# (admin / Bloc2-Demo-2026) : le dashboard n'écoute que sur localhost et ne
+# contient que des données synthétiques. Hors démo, exporter DASHBOARD_PASSWORD
+# avant make init-env ; en production la cible AWS injecte le hash depuis
+# Secrets Manager (terraform/modules/security).
+import os
+dashboard_password = os.environ.get("DASHBOARD_PASSWORD") or "Bloc2-Demo-2026"
 dashboard_hash = hashlib.sha256(dashboard_password.encode()).hexdigest()
 content = re.sub(r"^DASHBOARD_PASSWORD_HASH=$", f"DASHBOARD_PASSWORD_HASH={dashboard_hash}",
                   content, flags=re.MULTILINE)
@@ -47,7 +52,7 @@ p.write_text(content)
 print("[OK] .env généré avec des secrets aléatoires")
 print()
 print("=" * 60)
-print("  Identifiants dashboard (à noter — non ré-affichables) :")
+print("  Identifiants dashboard (démo locale, http://localhost:8501) :")
 print("    login    : admin")
 print(f"    password : {dashboard_password}")
 print("=" * 60)

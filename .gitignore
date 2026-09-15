@@ -51,3 +51,6 @@ logs/
 *.tfplan
 terraform.tfvars
 crash.log
+
+# Générateurs locaux des livrables de présentation (docx, drawio) — hors dépôt
+presentation/generators/
