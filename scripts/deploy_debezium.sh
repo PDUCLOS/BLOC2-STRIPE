@@ -49,6 +49,9 @@ import json
 from pathlib import Path
 template = Path("$PROJECT_ROOT/config/debezium-connector.json").read_text()
 config = json.loads(template)
+# Le nom vient du script (CONNECTOR_NAME) et non du template : sinon le connecteur
+# est créé sous un autre nom et la lecture de son statut renvoie 404.
+config["name"] = "$CONNECTOR_NAME"
 config["config"]["database.hostname"] = "postgres"
 config["config"]["database.user"] = "$PG_REPLICATION_USER"
 config["config"]["database.password"] = "$PG_REPLICATION_PASSWORD"

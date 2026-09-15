@@ -215,7 +215,7 @@ smoke:
 	@echo "  Kafka :"
 	@docker exec stripe-kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null | wc -l | xargs echo "  Topics count:"
 	@echo "  Debezium :"
-	@curl -fsS $(KAFKA_CONNECT_URL)/connectors/stripe-postgres-cdc/status 2>/dev/null | python3 -c "import sys, json; d = json.load(sys.stdin); print(f\"  State: {d['connector']['state']}\")"
+	@curl -fsS $(KAFKA_CONNECT_URL)/connectors/stripe-postgres-cdc-v2/status 2>/dev/null | python3 -c "import sys, json; d = json.load(sys.stdin); print(f\"  State: {d['connector']['state']}\")"
 
 # ─────────────────────────────────────────────────────────
 # Infrastructure as Code (cible AWS) — cf. terraform/README.md

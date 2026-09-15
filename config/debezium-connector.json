@@ -1,5 +1,5 @@
 {
-  "name": "stripe-postgres-cdc",
+  "name": "stripe-postgres-cdc-v2",
   "config": {
     "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
     "database.hostname": "postgres",

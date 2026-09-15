@@ -23,7 +23,7 @@ En pratique, le connecteur fait donc 3 choses : il lit PostgreSQL, il transforme
 | Ligne | Contenu | Rôle |
 |---|---|---|
 | 1 | `{` | Ouvre l'objet JSON principal. |
-| 2 | `"name": "stripe-postgres-cdc",` | Donne le nom du connecteur Debezium dans Kafka Connect. |
+| 2 | `"name": "stripe-postgres-cdc-v2",` | Donne le nom du connecteur Debezium dans Kafka Connect (le script `deploy_debezium.sh` impose ce même nom). |
 | 3 | `"config": {` | Ouvre l'objet contenant tous les paramètres du connecteur. |
 | 4 | `"connector.class": "io.debezium.connector.postgresql.PostgresConnector",` | Indique qu'on utilise le connecteur Debezium pour PostgreSQL. |
 | 5 | `"database.hostname": "postgres",` | Définit le nom d'hôte du serveur PostgreSQL à surveiller. |
