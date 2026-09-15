@@ -1,0 +1,153 @@
+name: CI
+
+# Déclenché sur push/PR vers main — pas de secrets requis (Snowflake reste
+# en dry-run, cf. etl/load_snowflake.py, docs/ARCHITECTURE.md). Tout le
+# reste de la stack tourne réellement via docker compose sur le runner.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch: {}
+
+jobs:
+  # ───────────────────────────────────────────────────────────────────────
+  # Lint rapide — pas de Docker, quelques secondes. Sert de garde-fou avant
+  # de lancer le job e2e (~5-8 min) : pas la peine de monter toute la stack
+  # si le code ne compile même pas.
+  # ───────────────────────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile syntax check (tous les .py)
+        run: |
+          find . -name "*.py" -not -path "./.venv/*" -not -path "./venv/*" \
+            -not -path "*/node_modules/*" -print0 \
+            | xargs -0 python3 -m py_compile
+          echo "[OK] Tous les fichiers .py compilent"
+
+      - name: Validité XML des diagrammes drawio
+        run: |
+          python3 - <<'EOF'
+          import xml.dom.minidom as minidom
+          from pathlib import Path
+          import sys
+
+          failed = False
+          for f in Path("presentation").glob("*.drawio"):
+              try:
+                  minidom.parse(str(f))
+                  print(f"[OK] {f}")
+              except Exception as e:
+                  print(f"[FAIL] {f}: {e}")
+                  failed = True
+          sys.exit(1 if failed else 0)
+          EOF
+
+      - name: Validité docker-compose.yml
+        run: docker compose config -q
+
+  # ───────────────────────────────────────────────────────────────────────
+  # Test d'intégration bout en bout — monte TOUTE la stack polyglotte
+  # (Postgres, Debezium, Kafka, Redis, MongoDB, le scorer) sur le runner,
+  # fait circuler du vrai trafic, et lance la même suite que
+  # `make test` en local. C'est un test d'intégration réel, pas des mocks —
+  # cohérent avec le principe déjà appliqué dans tout le projet
+  # (cf. ml/monitor.py::compute_served_performance, "servi pas resimulé").
+  # ───────────────────────────────────────────────────────────────────────
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+
+      - name: make init-env
+        run: make init-env
+
+      - name: make install (.venv + requirements.txt)
+        run: make install
+
+      - name: Démarre la stack Docker
+        run: make up
+
+      - name: Attend que les services soient healthy
+        run: |
+          for svc in stripe-postgres stripe-mongo stripe-kafka stripe-debezium stripe-redis; do
+            echo "Attente de $svc..."
+            for i in $(seq 1 60); do
+              health_status=$(docker inspect --format='{{.State.Health.Status}}' "$svc" 2>/dev/null || echo "starting")
+              if [ "$health_status" = "healthy" ]; then
+                echo "[OK] $svc healthy"
+                break
+              fi
+              if [ "$i" -eq 60 ]; then
+                echo "[ERROR] $svc jamais devenu healthy (dernier statut: $health_status)"
+                docker compose logs "$svc" --tail 100
+                exit 1
+              fi
+              sleep 3
+            done
+          done
+
+      - name: Kafka topics + rôles Postgres + connecteur Debezium
+        run: |
+          bash scripts/create_topics.sh
+          bash scripts/postgres_init_roles.sh
+          bash scripts/deploy_debezium.sh
+
+      - name: Seed data
+        run: make seed
+
+      - name: Démarre producer + scorer en tâche de fond
+        # Moteur à règles (SCORING_ENGINE=rules, défaut) : pas besoin
+        # d'entraîner un modèle XGBoost pour ce test d'intégration — le
+        # modèle ML est testé séparément par notebooks/audit_data_ml.ipynb
+        # quand ml/models/*.pkl existe (non versionné, cf. .gitignore).
+        run: |
+          set -a && source .env && set +a
+          nohup .venv/bin/python producers/transaction_producer.py --rate 10 \
+            > /tmp/producer.log 2>&1 &
+          echo $! > /tmp/producer.pid
+          nohup env KAFKA_BROKERS=localhost:29092 .venv/bin/python producers/flink_like_job.py \
+            > /tmp/scorer.log 2>&1 &
+          echo $! > /tmp/scorer.pid
+          sleep 20
+
+      - name: make test (tests/test_e2e.py)
+        run: make test
+
+      - name: make notebook-check (audit données/ML)
+        run: |
+          .venv/bin/python -m ipykernel install --user --name stripe-polyglot \
+            --display-name "Stripe Polyglot (bloc 2)"
+          make notebook-check
+
+      - name: Logs (si échec)
+        if: failure()
+        run: |
+          echo "── producer.log ──"; tail -50 /tmp/producer.log || true
+          echo "── scorer.log ──"; tail -50 /tmp/scorer.log || true
+          docker compose logs --tail 100
+
+      - name: Nettoyage
+        if: always()
+        run: |
+          kill "$(cat /tmp/producer.pid 2>/dev/null)" 2>/dev/null || true
+          kill "$(cat /tmp/scorer.pid 2>/dev/null)" 2>/dev/null || true
+          docker compose down -v

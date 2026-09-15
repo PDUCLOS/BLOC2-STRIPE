@@ -42,22 +42,68 @@ ALERTS_TOPIC  = "stripe.fraud.alerts"
 DLQ_TOPIC     = "stripe.etl.dead-letter"
 
 
+def _backfill_velocity(pg_conn, redis_client, customer_id, v_key_1h, v_key_24h, current_txn_id, now_ts):
+    """Reconstruit v1h_<id>/v24h_<id> depuis Postgres au lieu de laisser Redis
+    repartir de zéro pour ce client — même correctif que
+    producers/flink_like_job.py::_backfill_velocity (cf. docs/MLOPS.md §5.2) :
+    sans ça, un FLUSHALL Redis rend tout client indiscernable d'un vrai
+    nouveau client, et le modèle ML (qui a appris "vélocité quasi nulle =
+    fraude probable" — le générateur cible les clients new/inactive pour ses
+    patterns de fraude) déclenche une salve de faux positifs sur du trafic
+    légitime.
+    """
+    import psycopg2
+    try:
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                """SELECT EXTRACT(EPOCH FROM created_at) FROM transactions
+                   WHERE customer_id = %s
+                     AND created_at > NOW() - INTERVAL '24 hours'
+                     AND txn_id != %s""",
+                (customer_id, current_txn_id),
+            )
+            rows = cur.fetchall()
+    except psycopg2.Error:
+        pg_conn.rollback()
+        return
+
+    mapping_1h, mapping_24h = {}, {}
+    for (ts,) in rows:
+        ts = float(ts)
+        mapping_24h[str(ts)] = ts
+        if ts > now_ts - 3600:
+            mapping_1h[str(ts)] = ts
+    if mapping_1h:
+        redis_client.zadd(v_key_1h, mapping_1h)
+    if mapping_24h:
+        redis_client.zadd(v_key_24h, mapping_24h)
+
+
 # ─── Scoring ───────────────────────────────────────────────────────────────────
 class FraudScoringFunction(MapFunction):
     """Calcule le fraud_score pour chaque événement CDC Debezium."""
 
     def __init__(self):
         self.redis_client = None
+        self.pg_conn = None
 
     def open(self, runtime_context):
         # open() s'exécute une fois par instance de tâche sur le TaskManager
         # (pas par événement) : c'est là, et pas dans __init__, qu'on peut
-        # créer la connexion Redis car __init__ tourne côté client avant
-        # sérialisation de la fonction vers les workers Flink.
+        # créer les connexions Redis/Postgres car __init__ tourne côté client
+        # avant sérialisation de la fonction vers les workers Flink.
         import redis
+        import psycopg2
         self.redis_client = redis.Redis(
             host=REDIS_HOST, port=REDIS_PORT, decode_responses=True
         )
+        try:
+            self.pg_conn = psycopg2.connect(
+                host=PG_HOST, dbname=PG_DB, user=PG_USER, password=PG_PASSWORD,
+                connect_timeout=3,
+            )
+        except psycopg2.OperationalError:
+            self.pg_conn = None  # backfill désactivé, dégradé mais sûr
 
     def map(self, raw):
         try:
@@ -85,6 +131,13 @@ class FraudScoringFunction(MapFunction):
             # Vélocité Redis
             v_key_1h  = f"v1h_{customer_id}"
             v_key_24h = f"v24h_{customer_id}"
+            # Backfill AVANT le zadd de la transaction courante : cf.
+            # _backfill_velocity ci-dessus.
+            if (self.pg_conn is not None
+                    and not self.redis_client.exists(v_key_1h)
+                    and not self.redis_client.exists(v_key_24h)):
+                _backfill_velocity(self.pg_conn, self.redis_client, customer_id,
+                                    v_key_1h, v_key_24h, txn_id, now_ts)
             self.redis_client.zadd(v_key_1h,  {str(now_ts): now_ts})
             self.redis_client.zadd(v_key_24h, {str(now_ts): now_ts})
             self.redis_client.expire(v_key_1h, 3700)

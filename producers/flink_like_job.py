@@ -69,17 +69,62 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 
 
-def score_transaction(txn, r):
+def _backfill_velocity(pg_conn, r, customer_id, vkey_1h, vkey_24h, current_txn_id, now_ts):
+    """Reconstruit v1h_<id>/v24h_<id> depuis Postgres au lieu de laisser Redis
+    repartir de zéro pour ce client.
+
+    Root cause corrigée ici (cf. docs/MLOPS.md §5.2) : le générateur cible
+    délibérément des clients new/inactive pour ses patterns de fraude
+    (producers/transaction_producer.py::pick_customer_pm()), donc le modèle
+    apprend à raison "vélocité quasi nulle = fraude probable". Sans backfill,
+    un simple FLUSHALL Redis (ou un redémarrage à froid du scorer) rend
+    TOUS les clients — y compris les plus fidèles — indiscernables de
+    vrais nouveaux clients, et déclenche une salve de faux positifs sur du
+    trafic parfaitement légitime. On ne construit ce backfill qu'une seule
+    fois par client et par process (appelé seulement si la clé Redis
+    n'existe pas encore) — pas de coût Postgres sur le chemin chaud normal.
+    """
+    try:
+        with pg_conn.cursor() as cur:
+            cur.execute(
+                """SELECT EXTRACT(EPOCH FROM created_at) FROM transactions
+                   WHERE customer_id = %s
+                     AND created_at > NOW() - INTERVAL '24 hours'
+                     AND txn_id != %s""",
+                (customer_id, current_txn_id),
+            )
+            rows = cur.fetchall()
+    except psycopg2.Error:
+        pg_conn.rollback()
+        return
+
+    mapping_1h, mapping_24h = {}, {}
+    for (ts,) in rows:
+        ts = float(ts)
+        mapping_24h[str(ts)] = ts
+        if ts > now_ts - 3600:
+            mapping_1h[str(ts)] = ts
+    if mapping_1h:
+        r.zadd(vkey_1h, mapping_1h)
+    if mapping_24h:
+        r.zadd(vkey_24h, mapping_24h)
+
+
+def score_transaction(txn, r, pg_conn=None):
     """Calcule le score de fraude (logique identique au job PyFlink).
-    
+
     Cette fonction s'appuie sur Redis pour stocker et récupérer la "vélocité"
     (nombre de transactions par heure/jour pour un client donné) afin
     d'ajuster le score de fraude en temps réel.
-    
+
     Args:
         txn (dict): Dictionnaire de la transaction provenant de Kafka.
         r (redis.Redis): Instance de connexion à Redis.
-        
+        pg_conn (psycopg2.connection | None): utilisée pour reconstruire la
+            vélocité depuis l'historique réel si la clé Redis n'existe pas
+            encore (cf. _backfill_velocity) — None désactive le backfill
+            (dégradé mais sûr : vélocité repart de 0 comme avant ce correctif).
+
     Returns:
         dict: La transaction enrichie avec le score, la décision et les règles déclenchées.
               Retourne None si le customer_id est absent.
@@ -97,6 +142,15 @@ def score_transaction(txn, r):
         now_ts = time.time()
         vkey_1h = f"v1h_{customer_id}"
         vkey_24h = f"v24h_{customer_id}"
+
+        # Backfill AVANT le zadd de la transaction courante : si cette clé
+        # n'a jamais existé pour ce process (premier passage pour ce client
+        # depuis le dernier FLUSHALL/redémarrage), on restaure son vrai
+        # historique plutôt que de laisser croire qu'il s'agit d'un nouveau
+        # client — cf. _backfill_velocity ci-dessus.
+        if pg_conn is not None and not r.exists(vkey_1h) and not r.exists(vkey_24h):
+            _backfill_velocity(pg_conn, r, customer_id, vkey_1h, vkey_24h,
+                                txn.get("txn_id"), now_ts)
 
         # Ajout du timestamp courant dans le sorted set avec le score = timestamp
         r.zadd(vkey_1h, {str(now_ts): now_ts})
@@ -324,7 +378,7 @@ def main():
 
         # Scoring : si KO (txn malformé, pas de customer_id, etc), DLQ aussi
         try:
-            scored = score_transaction(txn, r)
+            scored = score_transaction(txn, r, pg_conn)
         except Exception as e:
             dlq_payload = json.dumps({
                 "error": f"scoring_error: {e}",

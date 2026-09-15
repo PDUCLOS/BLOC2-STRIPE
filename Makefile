@@ -3,8 +3,12 @@
 
 PROJECT_ROOT := $(shell pwd)
 COMPOSE := docker compose --env-file .env
-PYTHON := ./venv/bin/python
-PIP := ./venv/bin/pip
+PYTHON := ./.venv/bin/python
+PIP := ./.venv/bin/pip
+# python3.11 si dispo (versions de requirements.txt testées dessus), sinon
+# python3 du PATH — jamais un chemin absolu, pour rester portable entre
+# macOS (Homebrew), Linux et les runners CI (cf. .github/workflows/ci.yml).
+PYTHON_BIN := $(shell command -v python3.11 2>/dev/null || command -v python3)
 
 # Charge .env pour les scripts qui en ont besoin
 ifneq (,$(wildcard ./.env))
@@ -23,18 +27,18 @@ init-env:
 
 .PHONY: venv
 venv:
-	@if [ ! -d "venv" ]; then \
-		/opt/homebrew/bin/python3.11 -m venv venv; \
-		echo "[OK] venv créé (Python 3.11)"; \
+	@if [ ! -d ".venv" ]; then \
+		$(PYTHON_BIN) -m venv .venv; \
+		echo "[OK] .venv créé ($(PYTHON_BIN))"; \
 	else \
-		echo "[OK] venv existe déjà"; \
+		echo "[OK] .venv existe déjà"; \
 	fi
 	@$(PIP) install --upgrade pip
 
 .PHONY: install
 install: venv
 	@$(PIP) install -r requirements.txt
-	@echo "[OK] Dépendances Python installées dans venv/"
+	@echo "[OK] Dépendances Python installées dans .venv/"
 
 .PHONY: init
 init: init-env install

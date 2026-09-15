@@ -262,6 +262,21 @@ make smoke
 
 **Commentaire précis** : exécuter `make test` avant la présentation permet de prouver l'intégrité end-to-end sans dépendre uniquement d'une démonstration visuelle.
 
+## CI/CD & MLOps
+
+[![CI](https://github.com/PDUCLOS/BLOC2-STRIPE/actions/workflows/ci.yml/badge.svg)](https://github.com/PDUCLOS/BLOC2-STRIPE/actions/workflows/ci.yml)
+
+GitHub Actions ([`.github/workflows/ci.yml`](.github/workflows/ci.yml))
+monte la stack complète sur le runner à chaque push/PR (pas de mocks) et
+lance `make test` + `make notebook-check` (audit données/ML). Cycle de vie
+du modèle, monitoring, réentraînement automatique et incidents documentés :
+**[docs/MLOPS.md](docs/MLOPS.md)**.
+
+```bash
+# Reproduire la CI en local — mêmes commandes, pas de réimplémentation
+make init && make test && make notebook-check
+```
+
 ## Prérequis
 
 - Docker Desktop (>= 24.0)
