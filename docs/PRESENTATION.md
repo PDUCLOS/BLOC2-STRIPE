@@ -345,8 +345,8 @@ fact_transactions ──────── dim_merchants
 ### 4.1 Double listener Kafka (9092 + 29092)
 
 Un seul listener `localhost:9092` ne marche pas :
-- Depuis l'host (Mac) : `localhost:9092` ✓ (port mapping Docker)
-- Depuis un conteneur (Debezium, Flink) : `localhost:9092` = lui-même ✗
+- Depuis l'host (Mac) : `localhost:9092` fonctionne (port mapping Docker)
+- Depuis un conteneur (Debezium, Flink) : `localhost:9092` = lui-même, ne fonctionne pas
 
 Solution : 2 listeners :
 - `PLAINTEXT://0.0.0.0:9092` → advertised `kafka:9092` (interne)
@@ -432,12 +432,12 @@ Les services `flink-jobmanager` et `flink-taskmanager` sont déclarés dans le c
              └─ INSERT fraud_alerts (decision=block)
 8. T+500ms   UPDATE fraud_score=1.0 dans Postgres
 9. T+5s      Streamlit refresh:
-             ├─ "🚫 Blocked: +1" dans Overview
+             ├─ "Blocked: +1" dans Overview
              └─ Transaction rouge dans "Live Transactions"
              └─ Alerte dans "Fraud Alerts"
 ```
 
-Latence totale INSERT → décision visible dans le dashboard : **< 1 seconde** ✅
+Latence totale INSERT → décision visible dans le dashboard : **< 1 seconde**
 
 ---
 
@@ -458,11 +458,11 @@ Latence totale INSERT → décision visible dans le dashboard : **< 1 seconde** 
 ### 7.1 Test end-to-end automatisé
 
 `tests/test_e2e.py` valide les 5 étapes du pipeline :
-1. ✅ Health checks (Postgres, Redis, Mongo)
-2. ✅ Insertion d'une transaction frauduleuse (1500€ + pays à risque)
-3. ✅ Attente propagation Redis features (max 30s)
-4. ✅ Vérification Mongo (transaction_logs + fraud_alerts)
-5. ✅ Vérification write-back Postgres (fraud_score = 1.0)
+1. Health checks (Postgres, Redis, Mongo)
+2. Insertion d'une transaction frauduleuse (1500€ + pays à risque)
+3. Attente propagation Redis features (max 30s)
+4. Vérification Mongo (transaction_logs + fraud_alerts)
+5. Vérification write-back Postgres (fraud_score = 1.0)
 
 ### 7.2 Smoke tests manuels
 
@@ -502,7 +502,7 @@ make smoke
 
 ```
 .
-├── docker-compose.yml            # 5 services actifs (Postgres, Mongo, Kafka, Debezium, Redis)
+├── docker-compose.yml            # 6 services actifs (Postgres, Mongo, Kafka, Debezium, Redis, Dashboard)
 │                                # + 2 services profil "flink" (JobManager, TaskManager)
 ├── Makefile                      # orchestration (up/down/init/seed/producer/test)
 ├── demo.sh                       # one-shot: démarre tout pour la vidéo
@@ -536,7 +536,8 @@ make smoke
 │   └── fraud_scoring_job.py     # version PyFlink DataStream (référence prod)
 │
 ├── dashboard/
-│   └── app.py                   # Streamlit 5 pages
+│   ├── app.py                   # Streamlit 5 pages
+│   └── Dockerfile               # image du service `dashboard` (port 8501)
 │
 ├── etl/
 │   ├── snowflake_setup.py       # crée warehouse + schéma

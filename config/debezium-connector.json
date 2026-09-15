@@ -21,7 +21,7 @@
     "value.converter": "org.apache.kafka.connect.json.JsonConverter",
     "value.converter.schemas.enable": "false",
     "topic.prefix": "stripe",
-    "snapshot.mode": "no_data",
+    "snapshot.mode": "initial",
     "decimal.handling.mode": "double",
     "time.precision.mode": "connect"
   }

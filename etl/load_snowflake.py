@@ -19,7 +19,7 @@ try:
     from psycopg2.extras import RealDictCursor
     import snowflake.connector
 except ImportError as e:
-    print(f"❌ Dépendance manquante : {e}")
+    print(f"[ERROR] Dépendance manquante : {e}")
     sys.exit(1)
 
 PG_CONFIG = dict(
@@ -48,6 +48,7 @@ def extract_from_pg(target_date: date):
     Returns:
         list[dict]: Liste de dictionnaires contenant les données des transactions extraites.
     """
+    # Extraction bornée sur la journée pour des batches prévisibles et rejouables.
     conn = psycopg2.connect(**PG_CONFIG)
     with conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute("""
@@ -137,7 +138,7 @@ def load_to_snowflake(rows, target_date: date):
         target_date (date): La date de traitement (pour l'affichage/log).
     """
     if not SF_ACCOUNT:
-        print("⚠️  SNOWFLAKE_ACCOUNT non défini — export simulé (dry-run)")
+        print("[WARN] SNOWFLAKE_ACCOUNT non défini — export simulé (dry-run)")
         print(f"   {len(rows)} lignes SERAIENT chargées pour {target_date}")
         return
 
@@ -155,6 +156,7 @@ def load_to_snowflake(rows, target_date: date):
         return int(d.strftime("%Y%m%d"))
 
     loaded = 0
+    # Traitement par lots pour contrôler mémoire et temps d'exécution côté driver.
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i: i + BATCH_SIZE]
         values = []
@@ -184,6 +186,7 @@ def load_to_snowflake(rows, target_date: date):
                 r["created_at"],
             ))
 
+        # MERGE sur txn_id : idempotent en cas de relance du même batch.
         cur.executemany("""
             MERGE INTO fact_transactions tgt
             USING (SELECT
@@ -214,7 +217,7 @@ def load_to_snowflake(rows, target_date: date):
     sf.commit()
     cur.close()
     sf.close()
-    print(f"✅ {loaded} transactions chargées dans Snowflake pour {target_date}")
+    print(f"[OK] {loaded} transactions chargées dans Snowflake pour {target_date}")
 
 
 def main():
@@ -224,20 +227,20 @@ def main():
     et le chargement des faits dans Snowflake. Conçu pour être exécuté quotidiennement.
     """
     target = date.today()
-    print(f"🚀 ETL PostgreSQL → Snowflake — {target}")
+    print(f"[START] ETL PostgreSQL → Snowflake — {target}")
     print(f"   Source : {PG_CONFIG['host']}/{PG_CONFIG['dbname']}")
     print(f"   Cible  : {SF_DB}.{SF_SCHEMA}.fact_transactions")
     print()
 
-    print("📤 Extraction depuis PostgreSQL...")
+    print("Extraction depuis PostgreSQL...")
     rows = extract_from_pg(target)
     print(f"  → {len(rows)} transactions succeeded pour {target}")
 
     if not rows:
-        print("ℹ️  Aucune transaction à charger — le producer tourne-t-il ?")
+        print("[INFO] Aucune transaction à charger — le producer tourne-t-il ?")
         return
 
-    print("📥 Chargement vers Snowflake...")
+    print("Chargement vers Snowflake...")
     load_to_snowflake(rows, target)
 
 

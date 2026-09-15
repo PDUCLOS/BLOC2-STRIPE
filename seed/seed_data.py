@@ -51,6 +51,8 @@ def insert_merchants(cur):
         cur: Curseur de la base de données PostgreSQL.
     """
     print(f"  → Inserting {N_MERCHANTS} merchants...")
+    # Les jeux de données seed restent déterministes (seed RNG global) pour
+    # faciliter la reproductibilité des démos et des tests.
     rows = []
     used_emails = set()
     for _ in range(N_MERCHANTS):
@@ -126,6 +128,7 @@ def insert_payment_methods(cur):
         for _ in range(n):
             pm_type = random.choices(PAYMENT_METHOD_TYPES, weights=[85, 12, 3])[0]
             brand = random.choice(CARD_BRANDS) if pm_type == "card" else None
+            last4 = f"{random.randint(0, 9999):04d}" if pm_type == "card" else None
             fingerprint = fake.sha256() if pm_type == "card" else None
             is_default = (not has_default) and (random.random() < 0.4)
             if is_default:
@@ -134,6 +137,7 @@ def insert_payment_methods(cur):
                 cid,
                 pm_type,
                 brand,
+                last4,
                 fingerprint,
                 is_default,
                 (datetime.now(timezone.utc) + timedelta(days=random.randint(180, 1825))).date(),
@@ -141,24 +145,18 @@ def insert_payment_methods(cur):
 
     execute_values(
         cur,
-        "INSERT INTO payment_methods (customer_id, type, brand, fingerprint, is_default, expires_at) VALUES %s",
+        "INSERT INTO payment_methods (customer_id, type, brand, last4, fingerprint, is_default, expires_at) VALUES %s",
         rows,
         page_size=1000,
     )
 
 
 def main():
-    """Point d'entrée principal pour l'initialisation des données (seed).
-    
-    1. Se connecte à PostgreSQL.
-    2. Vide les tables existantes (TRUNCATE CASCADE).
-    3. Insère les marchands, les clients et les méthodes de paiement.
-    4. Affiche un résumé du nombre d'enregistrements créés.
-    """
-    print("🌱 Seeding data...")
+    """TRUNCATE puis réinsère merchants/customers/payment_methods depuis zéro. Reset complet, pas d'ajout incrémental."""
+    print("Seeding data...")
     with psycopg2.connect(**PG_CONFIG) as conn:
         with conn.cursor() as cur:
-            # Reset (cascade to PM)
+            # Reset complet pour éviter les biais de runs précédents pendant la démo.
             print("  → Truncating existing data...")
             cur.execute("TRUNCATE merchants, customers, payment_methods, transactions, refunds, fraud_indicators RESTART IDENTITY CASCADE")
 
@@ -168,19 +166,19 @@ def main():
 
             # Count check
             cur.execute("SELECT count(*) FROM merchants")
-            print(f"  ✓ Merchants: {cur.fetchone()[0]}")
+            print(f"  [OK] Merchants: {cur.fetchone()[0]}")
             cur.execute("SELECT count(*) FROM customers")
-            print(f"  ✓ Customers: {cur.fetchone()[0]}")
+            print(f"  [OK] Customers: {cur.fetchone()[0]}")
             cur.execute("SELECT count(*) FROM payment_methods")
-            print(f"  ✓ Payment methods: {cur.fetchone()[0]}")
+            print(f"  [OK] Payment methods: {cur.fetchone()[0]}")
 
         conn.commit()
-    print("✅ Seed terminé")
+    print("[OK] Seed terminé")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ Erreur seed: {e}", file=sys.stderr)
+        print(f"[ERROR] Erreur seed: {e}", file=sys.stderr)
         sys.exit(1)

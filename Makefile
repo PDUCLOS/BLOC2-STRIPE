@@ -19,38 +19,38 @@ endif
 init-env:
 	@bash scripts/init_env.sh
 	@echo ""
-	@echo "📝 Pense à remplir SNOWFLAKE_* dans .env quand tu auras créé ton compte trial"
+	@echo "Pense à remplir SNOWFLAKE_* dans .env quand tu auras créé ton compte trial"
 
 .PHONY: venv
 venv:
 	@if [ ! -d "venv" ]; then \
 		/opt/homebrew/bin/python3.11 -m venv venv; \
-		echo "✅ venv créé (Python 3.11)"; \
+		echo "[OK] venv créé (Python 3.11)"; \
 	else \
-		echo "✅ venv existe déjà"; \
+		echo "[OK] venv existe déjà"; \
 	fi
 	@$(PIP) install --upgrade pip
 
 .PHONY: install
 install: venv
 	@$(PIP) install -r requirements.txt
-	@echo "✅ Dépendances Python installées dans venv/"
+	@echo "[OK] Dépendances Python installées dans venv/"
 
 .PHONY: init
 init: init-env install
-	@echo "🚀 Démarrage de l'infra..."
+	@echo "Démarrage de l'infra..."
 	@$(COMPOSE) up -d --build
 	@echo ""
-	@echo "⏳ Attente que tous les services soient healthy..."
+	@echo "Attente que tous les services soient healthy..."
 	@$(COMPOSE) ps
 	@echo ""
-	@echo "📊 Initialisation des topics Kafka et connecteur Debezium..."
+	@echo "Initialisation des topics Kafka et connecteur Debezium..."
 	@sleep 10
 	@bash scripts/create_topics.sh
 	@bash scripts/postgres_init_roles.sh
 	@bash scripts/deploy_debezium.sh
 	@echo ""
-	@echo "✅ Stack prête !"
+	@echo "[OK] Stack prête !"
 
 # ─────────────────────────────────────────────────────────
 # Lifecycle
@@ -58,19 +58,19 @@ init: init-env install
 .PHONY: up
 up:
 	@$(COMPOSE) up -d
-	@echo "✅ Stack démarrée. Status :"
+	@echo "[OK] Stack démarrée. Status :"
 	@$(COMPOSE) ps
 
 .PHONY: down
 down:
 	@$(COMPOSE) down
-	@echo "✅ Stack arrêtée (volumes conservés)"
+	@echo "[OK] Stack arrêtée (volumes conservés)"
 
 .PHONY: clean
 clean:
 	@$(COMPOSE) down -v
-	@echo "✅ Stack arrêtée + volumes supprimés"
-	@echo "⚠️  Tu devras relancer 'make init' pour tout reconstruire"
+	@echo "[OK] Stack arrêtée + volumes supprimés"
+	@echo "[WARN] Tu devras relancer 'make init' pour tout reconstruire"
 
 .PHONY: restart
 restart: down up
@@ -81,13 +81,13 @@ logs:
 
 .PHONY: status
 status:
-	@echo "📊 Status des conteneurs :"
+	@echo "Status des conteneurs :"
 	@$(COMPOSE) ps
 	@echo ""
-	@echo "📨 Topics Kafka :"
+	@echo "Topics Kafka :"
 	@docker exec stripe-kafka kafka-topics --bootstrap-server localhost:9092 --list 2>/dev/null | grep stripe || echo "(aucun)"
 	@echo ""
-	@echo "🔌 Connecteurs Debezium :"
+	@echo "Connecteurs Debezium :"
 	@curl -fsS $(KAFKA_CONNECT_URL)/connectors 2>/dev/null || echo "(Debezium pas prêt)"
 
 # ─────────────────────────────────────────────────────────
@@ -96,7 +96,7 @@ status:
 .PHONY: seed
 seed:
 	@$(PYTHON) seed/seed_data.py
-	@echo "✅ Seed terminé"
+	@echo "[OK] Seed terminé"
 
 .PHONY: producer
 producer:
@@ -108,21 +108,21 @@ producer:
 .PHONY: flink-build
 flink-build:
 	@$(COMPOSE) build flink-jobmanager flink-taskmanager
-	@echo "✅ Image Flink (re)buildée"
+	@echo "[OK] Image Flink (re)buildée"
 
 .PHONY: flink-submit
 flink-submit:
-	@echo "🚀 Soumission du job PyFlink..."
+	@echo "Soumission du job PyFlink..."
 	@docker exec stripe-flink-jobmanager flink run \
 		--python /opt/flink/jobs/fraud_scoring_job.py \
 		--jobmanager flink-jobmanager:8081
-	@echo "✅ Job soumis. Status :"
+	@echo "[OK] Job soumis. Status :"
 	@curl -fsS $(FLINK_JOBMANAGER_URL)/jobs 2>/dev/null | python3 -m json.tool | head -30
 
 .PHONY: flink
 flink: flink-submit
 	@echo ""
-	@echo "📊 Flink UI : http://localhost:8081"
+	@echo "Flink UI : http://localhost:8081"
 
 # ─────────────────────────────────────────────────────────
 # Dashboard
@@ -141,12 +141,12 @@ dashboard:
 .PHONY: snowflake-setup
 snowflake-setup:
 	@$(PYTHON) etl/snowflake_setup.py
-	@echo "✅ Schéma Snowflake créé (si credentials OK)"
+	@echo "[OK] Schéma Snowflake créé (si credentials OK)"
 
 .PHONY: snowflake-export
 snowflake-export:
 	@$(PYTHON) etl/load_snowflake.py
-	@echo "✅ Export batch vers Snowflake terminé"
+	@echo "[OK] Export batch vers Snowflake terminé"
 
 # ─────────────────────────────────────────────────────────
 # Tests
@@ -157,7 +157,7 @@ test:
 
 .PHONY: smoke
 smoke:
-	@echo "🔍 Smoke tests :"
+	@echo "Smoke tests :"
 	@echo "  Postgres :"
 	@docker exec stripe-postgres psql -U $(PG_USER) -d $(PG_DB) -c "SELECT count(*) FROM merchants;" 2>/dev/null
 	@echo "  Mongo :"

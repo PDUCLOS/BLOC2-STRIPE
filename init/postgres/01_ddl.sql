@@ -38,6 +38,7 @@ CREATE TABLE payment_methods (
     customer_id   UUID NOT NULL REFERENCES customers(customer_id) ON DELETE CASCADE,
     type          VARCHAR(30) NOT NULL,
     brand         VARCHAR(20),
+    last4         CHAR(4),
     fingerprint   VARCHAR(64),
     is_default    BOOLEAN NOT NULL DEFAULT FALSE,
     expires_at    DATE,

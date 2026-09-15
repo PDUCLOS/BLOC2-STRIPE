@@ -20,7 +20,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - postgres-data:/var/lib/postgresql/data
       - ./init/postgres:/docker-entrypoint-initdb.d:ro
     command:
       - "postgres"
@@ -76,6 +76,9 @@ services:
       CLUSTER_ID: MkU3OEVBNTcwNTJENDM2Qk
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: "broker,controller"
+      # Double listener indispensable en local :
+      # - kafka:9092 pour les conteneurs
+      # - localhost:29092 pour les scripts Python host.
       KAFKA_LISTENERS: "PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093,PLAINTEXT_HOST://0.0.0.0:29092"
       KAFKA_ADVERTISED_LISTENERS: "PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT"
@@ -114,6 +117,8 @@ services:
     environment:
       BOOTSTRAP_SERVERS: kafka:9092
       GROUP_ID: stripe-connect
+      # Ces topics internes Connect doivent rester persistants pour reprendre
+      # correctement les offsets en cas de redémarrage de la stack.
       CONFIG_STORAGE_TOPIC: connect-configs
       OFFSET_STORAGE_TOPIC: connect-offsets
       STATUS_STORAGE_TOPIC: connect-status
@@ -159,6 +164,41 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+    restart: unless-stopped
+
+  # ─────────────────────────────────────────────────────────
+  # Streamlit (dashboard de démo)
+  # ─────────────────────────────────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    image: stripe-dashboard:latest
+    container_name: stripe-dashboard
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
+    environment:
+      PG_HOST: postgres
+      PG_PORT: 5432
+      PG_DB: ${PG_DB:-stripe_oltp}
+      PG_USER: ${PG_USER:-stripe_app}
+      PG_PASSWORD: ${PG_PASSWORD:?must be set in .env}
+      MONGO_HOST: mongo
+      MONGO_PORT: 27017
+      MONGO_USER: ${MONGO_USER:-admin}
+      MONGO_PASSWORD: ${MONGO_PASSWORD:?must be set in .env}
+      MONGO_DB: ${MONGO_DB:-stripe_nosql}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?must be set in .env}
+      FRAUD_SCORE_THRESHOLD: ${FRAUD_SCORE_THRESHOLD:-0.85}
     restart: unless-stopped
 
   # ─────────────────────────────────────────────────────────
@@ -251,6 +291,7 @@ services:
 # Volumes (named volumes pour contourner les bugs virtiofs sur macOS)
 # ─────────────────────────────────────────────────────────
 volumes:
+  postgres-data:
   kafka-data:
   debezium-data:
   flink-data:

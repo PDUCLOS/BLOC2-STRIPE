@@ -47,4 +47,4 @@ db.fraud_alerts.createIndex({ customer_id: 1, created_at: -1 });
 db.fraud_alerts.createIndex({ decision: 1, created_at: -1 });
 db.fraud_alerts.createIndex({ created_at: -1 });
 
-print("✅ Mongo collections et index créés pour " + (process.env.MONGO_DB || "stripe_nosql"));
+print("[OK] Mongo collections et index créés pour " + (process.env.MONGO_DB || "stripe_nosql"));

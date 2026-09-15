@@ -58,6 +58,7 @@ class FraudScoringFunction(MapFunction):
     def map(self, raw):
         try:
             event = json.loads(raw)
+            # Debezium envoie l'état courant dans payload.after pour les events utiles.
             after = event.get("payload", {}).get("after") or event.get("after", {})
             if not after:
                 return json.dumps({"_skip": True, "raw": raw})
@@ -127,6 +128,7 @@ class FraudScoringFunction(MapFunction):
                 conn.commit()
                 conn.close()
             except Exception:
+                # Le scoring continue même si le write-back échoue ponctuellement.
                 pass  # Non bloquant
 
             result = {
@@ -154,6 +156,7 @@ class FraudAlertFilter(FilterFunction):
 # ─── Main ───────────────────────────────────────────────────────────────────────
 def main():
     env = StreamExecutionEnvironment.get_execution_environment()
+    # Parallelism ajusté pour la démo locale; à relever en cluster selon partitions Kafka.
     env.set_parallelism(2)
 
     # Source Kafka

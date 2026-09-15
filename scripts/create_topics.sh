@@ -13,12 +13,13 @@ set +a
 
 KAFKA_BOOTSTRAP="${KAFKA_BROKERS:-localhost:9092}"
 
-echo "📨 Création des topics Kafka sur $KAFKA_BOOTSTRAP..."
+echo "Création des topics Kafka sur $KAFKA_BOOTSTRAP..."
 
 create_topic() {
   local topic=$1
   local partitions=$2
   local retention_ms=$3
+  # --if-not-exists rend l'opération idempotente pour rejouer le bootstrap sans risque.
   docker exec stripe-kafka kafka-topics \
     --bootstrap-server "$KAFKA_BOOTSTRAP" \
     --create --if-not-exists \
@@ -32,12 +33,13 @@ create_topic() {
 # Topics applicatifs
 create_topic "stripe.payments.events"      12  2592000000  # 30 jours
 create_topic "stripe.fraud.alerts"         3  2592000000  # 30 jours
+# DLQ gardé sans expiration pour ne jamais perdre les événements en erreur.
 create_topic "stripe.etl.dead-letter"      3  -1          # rétention infinie
 
 echo ""
-echo "📋 Topics existants :"
+echo "Topics existants :"
 docker exec stripe-kafka kafka-topics \
   --bootstrap-server "$KAFKA_BOOTSTRAP" --list | grep -E "^stripe\." || echo "(aucun pour l'instant — Debezium les créera au déploiement du connector)"
 
 echo ""
-echo "✅ Topics applicatifs créés"
+echo "[OK] Topics applicatifs créés"

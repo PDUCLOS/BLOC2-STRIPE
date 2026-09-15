@@ -51,14 +51,9 @@ _running = True
 
 
 def signal_handler(sig, frame):
-    """Gère l'interruption du script (Ctrl+C ou SIGTERM) pour un arrêt gracieux.
-    
-    Args:
-        sig: Signal reçu.
-        frame: Frame courante au moment du signal.
-    """
+    """Coupe la boucle proprement sur Ctrl+C / SIGTERM, pas de kill -9 en plein scoring."""
     global _running
-    print("\n⏹️  Stopping Flink-like job...")
+    print("\n[STOP] Stopping Flink-like job...")
     _running = False
 
 
@@ -123,6 +118,7 @@ def score_transaction(txn, r):
         print(f"  [WARN] Redis: {e}", file=sys.stderr)
 
     # Score
+    # Base à 0.1 pour représenter un risque résiduel minimal sur toute transaction.
     score_val = 0.1
     rules = []
 
@@ -167,15 +163,9 @@ def score_transaction(txn, r):
 
 
 def main():
-    """Point d'entrée principal du job Flink-like.
-    
-    1. Initialise les connexions (Redis, Kafka Consumer/Producer, Postgres).
-    2. Lit en continu depuis le topic `stripe.public.transactions` (CDC).
-    3. Traite chaque message (scoring).
-    4. Pousse le résultat dans `stripe.payments.events` (et `stripe.fraud.alerts` si besoin).
-    5. Fait un write-back optionnel du score dans Postgres pour clore la boucle.
-    """
-    print(f"🚀 Flink-like job started")
+    """Boucle de scoring : lit le CDC Postgres, score avec Redis en feature store, sink Kafka, et
+    write-back du fraud_score en base pour que le dashboard SQL soit à jour direct (pas de JOIN Kafka)."""
+    print(f"[START] Flink-like job started")
     print(f"   Kafka brokers: {KAFKA_BROKERS}")
     print(f"   Redis: {REDIS_HOST}:{REDIS_PORT}")
 
@@ -189,9 +179,9 @@ def main():
     )
     try:
         r.ping()
-        print(f"✅ Redis connected")
+        print(f"[OK] Redis connected")
     except redis.RedisError as e:
-        print(f"❌ Redis connection failed: {e}")
+        print(f"[ERROR] Redis connection failed: {e}")
         sys.exit(1)
 
     # Consumer Kafka
@@ -202,7 +192,7 @@ def main():
         "enable.auto.commit": True,
     })
     consumer.subscribe(["stripe.public.transactions"])
-    print(f"✅ Kafka consumer subscribed to stripe.public.transactions")
+    print(f"[OK] Kafka consumer subscribed to stripe.public.transactions")
 
     # Producer Kafka (pour les sinks)
     producer = Producer({
@@ -222,9 +212,9 @@ def main():
             user=PG_USER, password=PG_PASSWORD,
             connect_timeout=5,
         )
-        print(f"✅ PostgreSQL connected (for fraud_score write-back)")
+        print(f"[OK] PostgreSQL connected (for fraud_score write-back)")
     except psycopg2.OperationalError as e:
-        print(f"⚠️  PostgreSQL not reachable ({e}), fraud_score write-back disabled")
+        print(f"[WARN] PostgreSQL not reachable ({e}), fraud_score write-back disabled")
 
     count = 0
     alert_count = 0
@@ -296,6 +286,7 @@ def main():
         count += 1
 
         # Write-back fraud_score dans Postgres (optionnel, mais ferme la boucle)
+        # et aligne le dashboard OLTP avec la décision temps réel.
         if pg_conn is not None and scored.get("fraud_score") is not None:
             try:
                 with pg_conn.cursor() as cur:
@@ -320,7 +311,7 @@ def main():
             rate = count / elapsed if elapsed > 0 else 0
             print(f"  [{count:6d} txns, {alert_count:4d} alerts, {writeback_count:4d} wb] rate={rate:.1f}/s")
 
-    print(f"✅ Stopped: {count} txns, {alert_count} alerts, {writeback_count} writebacks")
+    print(f"[OK] Stopped: {count} txns, {alert_count} alerts, {writeback_count} writebacks")
     producer.flush(5)
     consumer.close()
     if pg_conn is not None:

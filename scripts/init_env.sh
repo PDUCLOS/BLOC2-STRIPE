@@ -6,13 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 if [ -f "$PROJECT_ROOT/.env" ]; then
-  echo "⚠️  .env existe déjà, pas de regen (supprime-le si tu veux forcer)"
+  echo "[WARN] .env existe déjà, pas de regen (supprime-le si tu veux forcer)"
   exit 0
 fi
 
 cp "$PROJECT_ROOT/.env.example" "$PROJECT_ROOT/.env"
 
 # Substitue les mots de passe par des secrets aléatoires
+# token_urlsafe(24) donne ~32 chars robustes sans caractères problématiques
+# pour la majorité des shells et URI de connexion.
 python3 - <<'EOF'
 import secrets
 import re
@@ -31,5 +33,5 @@ for k, v in replacements.items():
     # Remplace SEULEMENT les valeurs vides après le =
     content = re.sub(rf"^{re.escape(k)}$", v, content, flags=re.MULTILINE)
 p.write_text(content)
-print("✅ .env généré avec des secrets aléatoires")
+print("[OK] .env généré avec des secrets aléatoires")
 EOF

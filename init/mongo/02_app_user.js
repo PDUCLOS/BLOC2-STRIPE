@@ -14,11 +14,11 @@ try {
         pwd: appPwd,
         roles: [{ role: "readWrite", db: process.env.MONGO_DB || "stripe_nosql" }]
     });
-    print("✅ Utilisateur applicatif " + appUser + " créé");
+    print("[OK] Utilisateur applicatif " + appUser + " créé");
 } catch (e) {
     if (e.code === 51024) {  // UserAlreadyExists
         db.changeUserPassword(appUser, appPwd);
-        print("✅ Mot de passe de " + appUser + " mis à jour");
+        print("[OK] Mot de passe de " + appUser + " mis à jour");
     } else {
         throw e;
     }

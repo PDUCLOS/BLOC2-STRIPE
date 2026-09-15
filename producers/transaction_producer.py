@@ -44,14 +44,9 @@ _running = True
 
 
 def signal_handler(sig, frame):
-    """Gère l'interruption du script (Ctrl+C ou SIGTERM) pour un arrêt gracieux.
-    
-    Args:
-        sig: Signal reçu.
-        frame: Frame courante au moment du signal.
-    """
+    """Ctrl+C / SIGTERM : on stoppe après l'itération en cours pour ne pas laisser une transaction à moitié insérée."""
     global _running
-    print("\n⏹️  Stopping producer...")
+    print("\n[STOP] Stopping producer...")
     _running = False
 
 
@@ -120,6 +115,8 @@ def build_transaction(is_fraud: bool) -> dict:
             amount = random.randint(100, 500)  # card testing : 1€ → 5€
     currency = random.choice(CURRENCIES)
 
+    # Répartition volontaire pour produire un dataset mixte (fraude vs normal)
+    # qui reste exploitable visuellement dans le dashboard.
     if is_fraud and random.random() < 0.5:
         ip_country = random.choice(FRAUD_COUNTRIES)
     else:
@@ -182,7 +179,7 @@ def main():
                         help="Stop after N transactions (0 = infinite)")
     args = parser.parse_args()
 
-    print(f"🚀 Producer started: {args.rate} txn/s, {args.fraud_ratio*100:.1f}% fraud")
+    print(f"[START] Producer started: {args.rate} txn/s, {args.fraud_ratio*100:.1f}% fraud")
     if args.max_txns:
         print(f"   Will stop after {args.max_txns} transactions")
 
@@ -218,6 +215,7 @@ def main():
                     txn["customer_id"] = customer_id
                     txn["pm_id"] = pm_id
 
+                    # Burst = simulation de card testing / account takeover en rafale.
                     if is_fraud and random.random() < 0.3:
                         burst_remaining = random.randint(12, 20)
                         burst_customer_id = customer_id
@@ -237,7 +235,7 @@ def main():
                     print(f"  [{count:6d} txns, {fraud_count:4d} fraud] rate={1/max(elapsed, 0.001):.1f}/s")
 
                 if args.max_txns and count >= args.max_txns:
-                    print(f"✅ Reached max_txns={args.max_txns}, stopping")
+                    print(f"[OK] Reached max_txns={args.max_txns}, stopping")
                     break
 
                 # Pace — bursts go faster
@@ -246,12 +244,12 @@ def main():
                 if elapsed < target_sleep:
                     time.sleep(target_sleep - elapsed)
 
-    print(f"✅ Producer stopped: {count} txns total, {fraud_count} fraud ({fraud_count/count*100 if count else 0:.1f}%)")
+    print(f"[OK] Producer stopped: {count} txns total, {fraud_count} fraud ({fraud_count/count*100 if count else 0:.1f}%)")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        print(f"❌ Erreur producer: {e}", file=sys.stderr)
+        print(f"[ERROR] Erreur producer: {e}", file=sys.stderr)
         sys.exit(1)

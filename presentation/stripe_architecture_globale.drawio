@@ -1,0 +1,180 @@
+<mxfile host="Electron">
+  <diagram id="KqNFK4GF6WB5DsE7rdeu" name="Page-1">
+    <mxGraphModel dx="2012" dy="1368" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1654" pageHeight="1169" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="title" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;whiteSpace=wrap;rounded=0;fontSize=20;fontStyle=1;fontColor=#635BFF;" value="Stripe — Architecture de Données Unifiée" vertex="1">
+          <mxGeometry height="40" width="1000" x="300" y="20" as="geometry" />
+        </mxCell>
+        <mxCell id="api_layer" parent="1" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;fontStyle=1;" value="Couche API" vertex="1">
+          <mxGeometry height="90" width="500" x="550" y="80" as="geometry" />
+        </mxCell>
+        <mxCell id="api_gw" parent="api_layer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="API Gateway&#xa;(TLS 1.3 + JWT)" vertex="1">
+          <mxGeometry height="40" width="180" x="30" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="payment_api" parent="api_layer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;" value="Payment API&#xa;(FastAPI / Node.js)" vertex="1">
+          <mxGeometry height="40" width="180" x="290" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="oltp_box" parent="1" style="swimlane;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;" value="OLTP — PostgreSQL 16 (3NF, ACID)" vertex="1">
+          <mxGeometry height="310" width="420" x="60" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_merchants" parent="oltp_box" style="shape=table;html=1;whiteSpace=wrap;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="merchants&#xa;(UUID, name, country, tier)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_customers" parent="oltp_box" style="shape=table;html=1;whiteSpace=wrap;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="customers&#xa;(UUID, email, segment)" vertex="1">
+          <mxGeometry height="50" width="180" x="220" y="40" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_tx" parent="oltp_box" style="shape=table;html=1;whiteSpace=wrap;startSize=60;fillColor=#82b366;strokeColor=#6a9153;fontColor=#FFFFFF;fontSize=10;fontStyle=1;" value="transactions ★&#xa;(txn_id, merchant_id, customer_id,&#xa;amount BIGINT, status, fraud_score,&#xa;idempotency_key UNIQUE)" vertex="1">
+          <mxGeometry height="80" width="380" x="20" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_pm" parent="oltp_box" style="shape=table;html=1;whiteSpace=wrap;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="payment_methods&#xa;(fingerprint tokenisé, PCI-DSS)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_fraud" parent="oltp_box" style="shape=table;html=1;whiteSpace=wrap;startSize=30;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" value="fraud_indicators&#xa;(score, decision, rules_triggered)" vertex="1">
+          <mxGeometry height="50" width="180" x="220" y="200" as="geometry" />
+        </mxCell>
+        <mxCell id="pg_props" parent="oltp_box" style="text;html=1;align=center;fontSize=9;fontColor=#006600;fontStyle=2;" value="Patroni HA | Read Replicas | WAL | RBAC" vertex="1">
+          <mxGeometry height="30" width="380" x="20" y="265" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_box" parent="1" style="swimlane;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=13;fontStyle=1;" value="Apache Kafka (MSK AWS)" vertex="1">
+          <mxGeometry height="140" width="480" x="560" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_t1" parent="kafka_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="payment.created" vertex="1">
+          <mxGeometry height="40" width="130" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_t2" parent="kafka_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="payment.updated" vertex="1">
+          <mxGeometry height="40" width="130" x="175" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="kafka_t3" parent="kafka_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" value="fraud.events" vertex="1">
+          <mxGeometry height="40" width="130" x="330" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="debezium" parent="kafka_box" style="text;html=1;align=center;fontSize=10;fontColor=#996600;fontStyle=2;" value="Debezium CDC (PG → Kafka)" vertex="1">
+          <mxGeometry height="25" width="280" x="100" y="100" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_box" parent="1" style="swimlane;startSize=30;fillColor=#f8cecc;strokeColor=#b85450;fontSize=13;fontStyle=1;" value="MongoDB Atlas — NoSQL (schéma flexible)" vertex="1">
+          <mxGeometry height="310" width="460" x="1100" y="230" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_logs" parent="mongo_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="logs&#xa;(TTL 90j, RGPD)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_sessions" parent="mongo_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="user_interactions&#xa;(clickstream, checkout funnel)" vertex="1">
+          <mxGeometry height="50" width="180" x="240" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_ml" parent="mongo_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#b85450;strokeColor=#9b2335;fontColor=#FFFFFF;fontSize=10;fontStyle=1;" value="ml_features&#xa;(feature_vector, score, decision,&#xa;model_version)" vertex="1">
+          <mxGeometry height="60" width="400" x="20" y="115" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_feedback" parent="mongo_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="customer_feedback&#xa;(NPS, commentaires libres)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="195" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_webhooks" parent="mongo_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" value="webhooks&#xa;(delivery_attempts embedded)" vertex="1">
+          <mxGeometry height="50" width="180" x="240" y="195" as="geometry" />
+        </mxCell>
+        <mxCell id="mongo_props" parent="mongo_box" style="text;html=1;align=center;fontSize=9;fontColor=#990000;fontStyle=2;" value="Atlas Sharding | TTL Index | Schema Validation" vertex="1">
+          <mxGeometry height="30" width="420" x="20" y="262" as="geometry" />
+        </mxCell>
+        <mxCell id="ml_box" parent="1" style="swimlane;startSize=30;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=13;fontStyle=1;" value="ML Pipeline — Fraud Detection (&lt; 50ms)" vertex="1">
+          <mxGeometry height="130" width="480" x="560" y="430" as="geometry" />
+        </mxCell>
+        <mxCell id="flink" parent="ml_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="Apache Flink&#xa;(Stream Processing)" vertex="1">
+          <mxGeometry height="50" width="180" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="redis" parent="ml_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" value="Redis Feature Store&#xa;(velocity, device, historique)" vertex="1">
+          <mxGeometry height="50" width="180" x="270" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="olap_box" parent="1" style="swimlane;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;fontStyle=1;" value="OLAP — Snowflake / Data Warehouse (Star Schema)" vertex="1">
+          <mxGeometry height="200" width="980" x="70" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="fact_tx" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6c8ebf;strokeColor=#457fca;fontColor=#FFFFFF;fontSize=10;fontStyle=1;" value="fact_transactions ★&#xa;(txn_key, merchant_key, customer_key,&#xa;date_key, amount, fee, is_fraud)" vertex="1">
+          <mxGeometry height="70" width="220" x="370" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dim_merchant" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="dim_merchant&#xa;(country, industry, tier)" vertex="1">
+          <mxGeometry height="50" width="160" x="20" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dim_customer" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="dim_customer&#xa;(segment, country, age_group)" vertex="1">
+          <mxGeometry height="50" width="160" x="200" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dim_date" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="dim_date&#xa;(day, week, month, Q, year)" vertex="1">
+          <mxGeometry height="50" width="160" x="610" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="dim_pm" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" value="dim_payment_method&#xa;(type, brand, is_digital)" vertex="1">
+          <mxGeometry height="50" width="170" x="790" y="50" as="geometry" />
+        </mxCell>
+        <mxCell id="mv_rev" parent="olap_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;fontStyle=2;" value="mv_daily_revenue (MATERIALIZED VIEW)&#xa;Refresh Airflow toutes les heures" vertex="1">
+          <mxGeometry height="45" width="560" x="200" y="135" as="geometry" />
+        </mxCell>
+        <mxCell id="sec_box" parent="1" style="swimlane;startSize=30;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;fontStyle=1;" value="Sécurité et Conformité" vertex="1">
+          <mxGeometry height="200" width="460" x="1110" y="700" as="geometry" />
+        </mxCell>
+        <mxCell id="pci" parent="sec_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" value="PCI-DSS v4.0&#xa;Fingerprint tokenisé&#xa;Aucun PAN stocké" vertex="1">
+          <mxGeometry height="65" width="130" x="20" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="rgpd" parent="sec_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" value="RGPD&#xa;Pseudonymisation&#xa;TTL auto MongoDB&#xa;Droit effacement" vertex="1">
+          <mxGeometry height="65" width="130" x="165" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="crypto" parent="sec_box" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" value="Chiffrement&#xa;TLS 1.3 transit&#xa;AWS KMS at-rest&#xa;RBAC par service" vertex="1">
+          <mxGeometry height="65" width="130" x="310" y="45" as="geometry" />
+        </mxCell>
+        <mxCell id="siem" parent="sec_box" style="text;html=1;align=center;fontSize=9;fontColor=#333333;fontStyle=2;" value="SIEM — Audit logs 12 mois | VPC Isolation | Security Groups" vertex="1">
+          <mxGeometry height="55" width="420" x="20" y="125" as="geometry" />
+        </mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="payment_api" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#82b366;strokeWidth=2;" target="pg_tx">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="930" y="180" />
+              <mxPoint x="270" y="180" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" edge="1" parent="1" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d6b656;strokeWidth=2;fontSize=10;entryX=0.377;entryY=0.987;entryDx=0;entryDy=0;entryPerimeter=0;" target="kafka_t1" value="CDC">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="460" y="385.03703703703695" as="sourcePoint" />
+            <mxPoint x="630" y="320" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="kafka_t1" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;strokeWidth=2;fontSize=10;" target="flink" value="consume">
+          <mxGeometry relative="1" x="0.1353" y="25" as="geometry">
+            <mxPoint x="-5" y="-15" as="offset" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" edge="1" parent="1" source="kafka_t1" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;strokeWidth=2;fontSize=10;" target="mongo_logs" value="consume">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="645" y="200" />
+              <mxPoint x="1210" y="200" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" edge="1" parent="1" source="flink" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#9673a6;strokeWidth=1.5;fontSize=10;" target="redis" value="features">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" edge="1" parent="1" source="airflow" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;strokeWidth=1.5;fontSize=10;" target="mongo_ml" value="score">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="670" y="590" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" edge="1" parent="1" source="airflow" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#d79b00;strokeWidth=2;fontSize=10;" target="fact_tx" value="ETL batch">
+          <mxGeometry relative="1" x="-0.0693" y="-10" as="geometry">
+            <mxPoint as="offset" />
+            <Array as="points">
+              <mxPoint x="637" y="690" />
+              <mxPoint x="550" y="690" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a7SXT8T4XHjen0xumVaP-1" edge="1" parent="1" source="flink" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#b85450;strokeWidth=1.5;fontSize=10;" target="airflow" value="">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points" />
+            <mxPoint x="670" y="525" as="sourcePoint" />
+            <mxPoint x="1320" y="405" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="airflow" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;fontStyle=1;" value="Apache Airflow — ETL Batch (2h00 UTC)" vertex="1">
+          <mxGeometry height="50" width="380" x="447" y="600" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

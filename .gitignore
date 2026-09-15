@@ -1,23 +1,37 @@
+# === Secrets (JAMAIS sur git) ===
 .env
 .env.local
 .env.*
 !.env.example
-*.log
+
+# === Python ===
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.egg-info/
 .venv/
 venv/
-# All Docker volume data (Postgres, Mongo, Redis, Kafka, Debezium, Flink)
-data/
-.idea/
-.vscode/
-.DS_Store
-*.swp
-*.swo
-.idea_modules/
+env/
 .coverage
 htmlcov/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# === Données runtime des conteneurs (Postgres, Mongo, Redis, Kafka, Debezium, Flink) ===
+data/
+
+# === Logs ===
+*.log
+logs/
+
+# === IDE / OS / Agents ===
+.idea/
+.idea_modules/
+.vscode/
+.claude/
+.DS_Store
+*.swp
+*.swo
+
+# === Fichiers temporaires Office ===
+~$*
