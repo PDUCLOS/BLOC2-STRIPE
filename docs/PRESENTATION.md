@@ -603,7 +603,7 @@ conditions réelles (stack Docker complète) :
 ### 8.2 Limites restantes de la démo
 
 - **Pas de vrai cluster Flink** : job Python "Flink-like" qui imite la logique DataStream. Causé par les bugs de build PyFlink sur ARM64 (numpy 1.21.4, JDK headers, ClassCastException [B).
-- **CI encore jamais exécutée sur GitHub** : `.github/workflows/ci.yml` (jobs `lint`, `e2e`, `terraform`) est dans le dépôt et ses commandes passent en local (`make test`, `make queries-check`, `make tf-validate`), mais le premier run n'aura lieu qu'au prochain push.
+- **CI exécutée sur GitHub depuis le 16/09/2026** : les trois jobs (`lint`, `e2e`, `terraform`) sont verts — 16/16 tests de bout en bout, requêtes SQL et MongoDB, `terraform validate`. Les six premiers passages ont révélé autant de bugs invisibles en local (plateforme ARM/x86, nom du connecteur Debezium, utilisateur MongoDB, vues matérialisées, index TTL des journaux, seuils ML appliqués au moteur à règles) : tous corrigés.
 - **Modèle écrasé à chaque réentraînement** : le rechargement à chaud prend bien la nouvelle version, mais l'ancienne n'est conservée que dans MLflow ; pas de retour arrière automatique si la nouvelle version est moins bonne (cf. §3.8).
 - **Airflow en mode standalone** (SQLite, SequentialExecutor, un seul process) : suffisant pour démontrer l'orchestration, pas dimensionné pour un vrai débit de DAGs concurrents.
 - **`analytics_reader`** limite l'accès en lecture à `payment_methods.fingerprint`, mais aucun rôle équivalent n'existe encore côté MongoDB (un seul utilisateur applicatif `stripe_app` avec `readWrite` complet).
