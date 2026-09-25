@@ -117,31 +117,67 @@ def pick_customer_pm(cur, is_fraud: bool):
 # Construction du payload transaction
 # -----------------------------------------------------------------------------
 
-def build_transaction(is_fraud: bool) -> dict:
-    """Build a transaction payload. Fraud patterns:
-       - gros montant (>500€) + pays à risque + device mobile inconnu
-       - ou petit montant répété (card testing) signalé via metadata
+# Profils de fraude : la proportion de fraudes « furtives » plafonne volontairement
+# le rappel atteignable, et le bruit côté légitime plafonne la précision. Sans
+# cela, les features (montant, pays, appareil, vélocité) recodaient exactement la
+# recette du générateur et le modèle affichait 0,99 de précision servie — un
+# chiffre qui mesurait la fidélité du pipeline, pas la difficulté du problème.
+FRAUD_PROFILES = [("brutal", 0.35), ("card_testing", 0.25), ("furtive", 0.40)]
+
+
+def pick_fraud_profile() -> str:
+    """Tire un profil de fraude selon FRAUD_PROFILES."""
+    r, acc = random.random(), 0.0
+    for name, weight in FRAUD_PROFILES:
+        acc += weight
+        if r < acc:
+            return name
+    return FRAUD_PROFILES[-1][0]
+
+
+def build_transaction(is_fraud: bool, profile: str = None) -> dict:
+    """Construit le payload d'une transaction.
+
+    Fraude (is_fraud=True), selon le profil :
+      - brutal       : gros montant (100 → 2 000 €), 60 % pays à risque, 30 % appareil POS
+      - card_testing : petits montants (1 → 5 €) répétés en rafale, pays normal
+      - furtive      : montant, pays et appareil ordinaires — indiscernable par les
+                       features actuelles (compte récent ou inactif seulement)
+    Légitime : bruit réaliste — voyageurs depuis un pays à risque (3 %), terminal
+    POS (8 %), gros achats (2 %) — pour que les signaux « fraude » ne soient pas
+    des preuves.
     """
-    # Valeur de départ réaliste pour une transaction ordinaire.
-    amount = random.randint(50, 50000)  # centimes, 0.50€ → 500€
-    if is_fraud:
-        # 70% gros montant, 30% petit (card testing)
-        if random.random() < 0.7:
-            amount = random.randint(10000, 200000)  # 100€ → 2000€
-        else:
-            amount = random.randint(100, 500)  # card testing : 1€ → 5€
+    profile = profile or (pick_fraud_profile() if is_fraud else None)
+
+    amount = random.randint(50, 50000)  # centimes, 0.50 € → 500 €
+    ip_country = random.choice(NORMAL_COUNTRIES)
+    device = random.choice(DEVICE_TYPES[:3])  # mobile, desktop, tablet
+
+    if profile == "brutal":
+        amount = random.randint(10000, 200000)  # 100 € → 2 000 €
+        if random.random() < 0.6:
+            ip_country = random.choice(FRAUD_COUNTRIES)
+        if random.random() < 0.3:
+            device = "pos"
+    elif profile == "card_testing":
+        amount = random.randint(100, 500)  # 1 € → 5 €
+        if random.random() < 0.2:
+            ip_country = random.choice(FRAUD_COUNTRIES)
+    elif profile == "furtive":
+        amount = random.randint(2000, 60000)  # 20 € → 600 € : dans la masse
+    else:
+        # Légitime : quelques comportements atypiques mais honnêtes
+        if random.random() < 0.03:
+            ip_country = random.choice(FRAUD_COUNTRIES)  # voyage, expatriation
+        if random.random() < 0.08:
+            device = "pos"  # paiement en boutique
+        if random.random() < 0.02:
+            amount = random.randint(50000, 200000)  # achat premium 500 → 2 000 €
     currency = random.choice(CURRENCIES)
 
-    # Répartition volontaire pour produire un dataset mixte (fraude vs normal)
-    # qui reste exploitable visuellement dans le dashboard.
-    if is_fraud and random.random() < 0.5:
-        ip_country = random.choice(FRAUD_COUNTRIES)
-    else:
-        ip_country = random.choice(NORMAL_COUNTRIES)
-
-    device = random.choice(DEVICE_TYPES)
-    if is_fraud and random.random() < 0.3:
-        device = "pos"  # atypical device for online fraud
+    # user_agent : indice, pas preuve — la moitié des fraudes utilisent un navigateur normal.
+    browser_ua = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36"
+    user_agent = browser_ua if (not is_fraud or random.random() < 0.5) else "curl/8.4.0"
 
     # Le payload reste volontairement proche du schéma attendu en base.
     return {
@@ -156,9 +192,10 @@ def build_transaction(is_fraud: bool) -> dict:
         "device_type": device,
         "ip_country": ip_country,
         "metadata": json.dumps({
-            "user_agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36" if not is_fraud else "curl/8.4.0",
+            "user_agent": user_agent,
             "session_id": str(uuid.uuid4()),
             "is_fraud_pattern": is_fraud,
+            "fraud_profile": profile,
             "producer_ts": datetime.now(timezone.utc).isoformat(),
         }),
     }
@@ -212,6 +249,8 @@ def main():
     fraud_count = 0
     # Variables de contexte pour simuler une rafale de fraude sur un même compte.
     burst_remaining = 0
+    burst_is_fraud = False
+    burst_profile = None
     burst_customer_id = None
     burst_pm_id = None
     burst_merchant_id = None
@@ -226,8 +265,8 @@ def main():
                 # le même triplet marchand/client/moyen de paiement pour simuler une rafale
                 # d'essais de carte volée sur un seul compte (au lieu d'une fraude isolée).
                 if burst_remaining > 0:
-                    is_fraud = True
-                    txn = build_transaction(is_fraud)
+                    is_fraud = burst_is_fraud
+                    txn = build_transaction(is_fraud, burst_profile)
                     txn["merchant_id"] = burst_merchant_id
                     txn["customer_id"] = burst_customer_id
                     txn["pm_id"] = burst_pm_id
@@ -237,6 +276,7 @@ def main():
                 else:
                     is_fraud = random.random() < args.fraud_ratio
                     txn = build_transaction(is_fraud)
+                    profile = json.loads(txn["metadata"]).get("fraud_profile")
                     txn["merchant_id"] = pick_merchant(cur)
                     customer_id, pm_id = pick_customer_pm(cur, is_fraud)
                     if not customer_id:
@@ -245,13 +285,25 @@ def main():
                     txn["customer_id"] = customer_id
                     txn["pm_id"] = pm_id
 
-                    # Burst = simulation de card testing / account takeover en rafale.
-                    if is_fraud and random.random() < 0.3:
-                        burst_remaining = random.randint(12, 20)
+                    # Rafales : card testing (toujours), fraude brutale (1 fois sur 3) —
+                    # jamais la fraude furtive. Côté légitime, 4 % des clients enchaînent
+                    # aussi plusieurs achats (billets, panier en plusieurs fois) : la
+                    # vélocité seule ne prouve donc rien.
+                    burst_len = 0
+                    if profile == "card_testing":
+                        burst_len = random.randint(4, 10)
+                    elif profile == "brutal" and random.random() < 0.3:
+                        burst_len = random.randint(3, 8)
+                    elif not is_fraud and random.random() < 0.04:
+                        burst_len = random.randint(3, 6)
+                    if burst_len:
+                        burst_remaining = burst_len
+                        burst_is_fraud = is_fraud
+                        burst_profile = profile
                         burst_customer_id = customer_id
                         burst_pm_id = pm_id
                         burst_merchant_id = txn["merchant_id"]
-                        print(f"  [BURST] {burst_remaining} rapid txns for customer {customer_id[:8]}…")
+                        print(f"  [BURST] {burst_remaining} rapid txns ({profile or 'legit'}) for customer {customer_id[:8]}…")
 
                 insert_transaction(cur, txn)
                 conn.commit()
@@ -269,9 +321,12 @@ def main():
                     print(f"[OK] Reached max_txns={args.max_txns}, stopping")
                     break
 
-                # Pace — bursts go faster
-                # Les bursts sont volontairement plus rapides pour créer une signature visible.
-                target_sleep = sleep_per_txn * 0.1 if burst_remaining > 0 else sleep_per_txn
+                # Rafales plus rapides que le flux normal ; une rafale légitime est plus lente
+                # qu'un card testing (0,3 contre 0,1 du pas nominal).
+                if burst_remaining > 0:
+                    target_sleep = sleep_per_txn * (0.1 if burst_is_fraud else 0.3)
+                else:
+                    target_sleep = sleep_per_txn
                 elapsed = time.time() - loop_start
                 if elapsed < target_sleep:
                     time.sleep(target_sleep - elapsed)

@@ -212,6 +212,11 @@ ml-train:
 test:
 	@$(PYTHON) tests/test_e2e.py
 
+# Tests unitaires ML (features, entraînement, repli sur règles) : sans Docker.
+.PHONY: test-ml
+test-ml:
+	@$(PYTHON) tests/test_ml_model.py
+
 .PHONY: smoke
 smoke:
 	@echo "Smoke tests :"

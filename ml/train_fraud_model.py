@@ -25,6 +25,7 @@ import pandas as pd
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from sklearn.metrics import (
+    average_precision_score,
     classification_report, roc_auc_score, precision_score, recall_score, f1_score
 )
 import xgboost as xgb
@@ -207,16 +208,33 @@ def train_model(X_train, y_train):
     # sans ce poids, le modèle apprendrait trivialement à toujours prédire "légitime".
     scale_pos_weight = (n_neg / n_pos) if n_pos > 0 else 1.0
 
+    # Arrêt anticipé sur une validation TEMPORELLE (les 15 % les plus récents du
+    # train) : le nombre d'arbres n'est plus fixé à la main, et le modèle cesse
+    # d'apprendre dès que la validation ne progresse plus — protection contre le
+    # surapprentissage. Arbres un peu plus profonds mais régularisés
+    # (sous-échantillonnage, min_child_weight, L2) ; métrique aucpr, plus
+    # informative que logloss sur une classe positive minoritaire.
+    n_val = max(int(len(X_train) * 0.15), 1)
+    X_fit, y_fit = X_train[:-n_val], y_train[:-n_val]
+    X_val, y_val = X_train[-n_val:], y_train[-n_val:]
+
     params = dict(
-        n_estimators=200,
-        max_depth=4,
-        learning_rate=0.1,
+        n_estimators=600,
+        max_depth=5,
+        learning_rate=0.05,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        min_child_weight=5,
+        reg_lambda=2.0,
         scale_pos_weight=scale_pos_weight,
-        eval_metric="logloss",
+        eval_metric="aucpr",
+        early_stopping_rounds=30,
         random_state=42,
     )
     model = xgb.XGBClassifier(**params)
-    model.fit(X_train, y_train)
+    model.fit(X_fit, y_fit, eval_set=[(X_val, y_val)], verbose=False)
+    params["best_iteration"] = int(model.best_iteration)
+    print(f"  Arrêt anticipé : {params['best_iteration'] + 1} arbres retenus sur {params['n_estimators']}")
     return model, params
 
 
@@ -229,10 +247,19 @@ def evaluate_model(model, X_test, y_test):
     y_proba = model.predict_proba(X_test)[:, 1]
     y_pred = (y_proba >= 0.5).astype(int)
 
+    # Seuil de blocage réellement servi (cf. FRAUD_SCORE_THRESHOLD du scorer) :
+    # la précision/rappel « à 0.5 » est la métrique académique, celle « au
+    # blocage » est ce que le monitoring mesure ensuite en production.
+    block_thr = float(os.environ.get("FRAUD_SCORE_THRESHOLD", 0.85))
+    y_block = (y_proba >= block_thr).astype(int)
+
     metrics = {
         "precision": float(precision_score(y_test, y_pred, zero_division=0)),
         "recall": float(recall_score(y_test, y_pred, zero_division=0)),
         "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+        "precision_at_block": float(precision_score(y_test, y_block, zero_division=0)),
+        "recall_at_block": float(recall_score(y_test, y_block, zero_division=0)),
+        "average_precision": float(average_precision_score(y_test, y_proba)) if len(set(y_test)) > 1 else None,
         # roc_auc nécessite les deux classes présentes dans y_test — protégé
         # pour ne pas planter sur un petit échantillon de test déséquilibré.
         "roc_auc": float(roc_auc_score(y_test, y_proba)) if len(set(y_test)) > 1 else None,

@@ -32,6 +32,11 @@ jobs:
             | xargs -0 python3 -m py_compile
           echo "[OK] Tous les fichiers .py compilent"
 
+      - name: Tests unitaires ML (tests/test_ml_model.py, sans Docker)
+        run: |
+          python3 -m pip install -q -r requirements.txt
+          python3 tests/test_ml_model.py
+
       - name: Validité XML des diagrammes drawio
         run: |
           python3 - <<'EOF'

@@ -156,11 +156,11 @@ def test_scoring_returns_none_without_model():
     # ou non sur cette machine.
     original_path = scoring_module.MODEL_PATH
     original_cache = scoring_module._model_cache
-    original_attempted = scoring_module._model_load_attempted
+    original_attempted = scoring_module._model_cache_mtime
     try:
         scoring_module.MODEL_PATH = Path(tempfile.mkdtemp()) / "does_not_exist.pkl"
         scoring_module._model_cache = None
-        scoring_module._model_load_attempted = False
+        scoring_module._model_cache_mtime = None
 
         result = scoring_module.score(
             amount=150000, created_at=datetime.now(timezone.utc),
@@ -170,7 +170,7 @@ def test_scoring_returns_none_without_model():
     finally:
         scoring_module.MODEL_PATH = original_path
         scoring_module._model_cache = original_cache
-        scoring_module._model_load_attempted = original_attempted
+        scoring_module._model_cache_mtime = original_attempted
 
 
 def test_score_transaction_falls_back_to_rules_when_ml_unavailable():
@@ -182,12 +182,12 @@ def test_score_transaction_falls_back_to_rules_when_ml_unavailable():
     original_engine = job.SCORING_ENGINE
     original_path = scoring_module.MODEL_PATH
     original_cache = scoring_module._model_cache
-    original_attempted = scoring_module._model_load_attempted
+    original_attempted = scoring_module._model_cache_mtime
     try:
         job.SCORING_ENGINE = "ml"
         scoring_module.MODEL_PATH = Path(tempfile.mkdtemp()) / "does_not_exist.pkl"
         scoring_module._model_cache = None
-        scoring_module._model_load_attempted = False
+        scoring_module._model_cache_mtime = None
 
         class _FakeRedis:
             """Simule l'API Redis minimale utilisée par score_transaction, sans instance réelle."""
@@ -213,7 +213,7 @@ def test_score_transaction_falls_back_to_rules_when_ml_unavailable():
         job.SCORING_ENGINE = original_engine
         scoring_module.MODEL_PATH = original_path
         scoring_module._model_cache = original_cache
-        scoring_module._model_load_attempted = original_attempted
+        scoring_module._model_cache_mtime = original_attempted
 
 
 # ─── Runner ─────────────────────────────────────────────────────────────────
