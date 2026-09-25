@@ -79,6 +79,10 @@ def get_mongo_db():
     return MongoClient(uri, serverSelectionTimeoutMS=5000)[MONGO_DB]
 
 
+# Features exclues du test de dérive (cf. compute_drift).
+CALENDAR_FEATURES = ("hour_of_day", "day_of_week")
+
+
 def compute_drift(X_reference, X_current):
     """Calcule le score de drift Evidently entre les features de référence et courantes.
 
@@ -89,14 +93,22 @@ def compute_drift(X_reference, X_current):
         dict: {"drift_share": float, "dataset_drift": bool} — drift_share est
         la proportion de colonnes dont la distribution a significativement changé.
     """
-    ref_df = pd.DataFrame(X_reference, columns=FEATURE_NAMES)
-    cur_df = pd.DataFrame(X_current, columns=FEATURE_NAMES)
+    # Les features calendaires (heure, jour) « dérivent » par construction : une
+    # fenêtre de 30 min comparée à une référence étalée sur des heures a toujours
+    # une distribution d'heures différente. Les compter faisait dépasser le seuil
+    # en permanence (2 colonnes sur 7 = 0,29 avant même tout changement de
+    # comportement) et relançait un réentraînement à chaque délai de carence.
+    # La dérive est donc mesurée sur les features comportementales seulement.
+    ref_df = pd.DataFrame(X_reference, columns=FEATURE_NAMES).drop(columns=list(CALENDAR_FEATURES))
+    cur_df = pd.DataFrame(X_current, columns=FEATURE_NAMES).drop(columns=list(CALENDAR_FEATURES))
     report = Report(metrics=[DataDriftPreset()])
     report.run(reference_data=ref_df, current_data=cur_df)
     result = report.as_dict()["metrics"][0]["result"]
     return {
         "drift_share": float(result["share_of_drifted_columns"]),
         "dataset_drift": bool(result["dataset_drift"]),
+        "drifted_columns": int(result["number_of_drifted_columns"]),
+        "columns_tested": list(cur_df.columns),
     }
 
 
