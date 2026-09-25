@@ -108,7 +108,7 @@ Construire une plateforme de paiement capable de **détecter les transactions fr
 │                        COUCHE VISUALISATION                          │
 │                                                                       │
 │                              ┌─────────────────┐                     │
-│                              │  Streamlit 1.32 │  Login + 2 onglets   │
+│                              │  Streamlit 1.37 │  Login + 2 onglets   │
 │                              │  (Python 3.11)  │  • Vue d'ensemble    │
 │                              │                 │  • Performance ML    │
 │                              │                 │                      │

@@ -101,7 +101,7 @@ Plateforme **polyglotte** qui simule un système de paiement Stripe :
 | **Machine Learning** | XGBoost 2.0 | Modèle de scoring fraude entraîné (repli règles si absent) |
 | **ML suivi** | MLflow 2.14 | Runs d'entraînement, registre de modèles |
 | **ML monitoring** | Evidently 0.4 | Dérive + performance live, réentraînement auto |
-| **Visualisation** | Streamlit 1.32 | Dashboard live, 2 onglets (Vue d'ensemble + Performance ML) |
+| **Visualisation** | Streamlit 1.37 | Dashboard live, 2 onglets (Vue d'ensemble + Performance ML) |
 | **OLAP** | Snowflake | Star schema, batch quotidien |
 | **Orchestration** | Apache Airflow 2.9 (profil optionnel) / Makefile | DAG ETL quotidien |
 

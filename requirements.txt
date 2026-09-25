@@ -6,7 +6,7 @@ redis==5.0.1
 kafka-python==2.0.2
 confluent-kafka==2.3.0
 python-dotenv==1.0.0
-streamlit==1.32.0
+streamlit==1.37.1  # 1.32.0 : page blanche après connexion (bug front « reading 'vertical' ») dès que la page grossit
 pandas==2.1.4
 plotly==5.18.0
 snowflake-connector-python==3.6.0

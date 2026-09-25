@@ -402,8 +402,14 @@ def recent_suspicious():
         pd.DataFrame: Données des transactions suspectes.
     """
     return pg_query("""
-        SELECT t.txn_id, t.amount/100.0 AS amount_eur, t.currency,
-               t.fraud_score, t.ip_country, t.device_type, t.created_at
+        -- Types explicites (float, texte) : les Decimal de PostgreSQL et les
+        -- horodatages tz-aware passent mal dans la grille du dashboard.
+        SELECT t.txn_id::text AS txn_id,
+               ROUND(t.amount / 100.0, 2)::float8 AS amount_eur,
+               t.currency,
+               t.fraud_score::float8 AS fraud_score,
+               t.ip_country, t.device_type,
+               to_char(t.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS') AS created_at
         FROM transactions t
         -- Seuil 0.6 = REVIEW_THRESHOLD (pas FRAUD_THRESHOLD 0.85) : on veut voir
         -- ici toute la zone "à surveiller", pas seulement les transactions bloquées.
@@ -656,6 +662,9 @@ with tab_overview:
                 return "background-color: #3d2d10; color: #ffaa44"
             return ""
 
+        # Streamlit >= 1.37 requis (requirements.txt) : en 1.32.0, la page devenait
+        # blanche après connexion dès qu'elle dépassait une certaine taille
+        # (bug du front « reading 'vertical' », cf. docs/MLOPS.md §5.4).
         st.dataframe(
             df_sus.rename(columns={
                 "txn_id": "ID Transaction", "amount_eur": "Montant (€)",

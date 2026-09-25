@@ -272,6 +272,32 @@ d'amélioration notée : exclure du jeu d'entraînement les minutes qui suivent
 un redémarrage de la stack, ou exiger un nombre minimal de minutes « chaudes »
 avant de déclencher un réentraînement sur dérive.
 
+### 5.4 — Page blanche du dashboard après connexion (2026-09-25)
+
+**Symptôme** : après la connexion, la page du dashboard reste blanche ; la console
+du navigateur affiche `TypeError: Cannot read properties of undefined (reading 'vertical')`
+dans le bundle Streamlit. Aucune erreur côté serveur.
+
+**Fausses pistes** écartées une à une : conflit de port avec le projet bloc 3
+(ports distincts : 18501, 15432), cache navigateur (reproduit sur une origine
+neuve), types `Decimal` de PostgreSQL (requête durcie, sans effet), la table
+elle-même (`st.dataframe`, `st.table` et du HTML pur plantent tous au même
+endroit). Bissection par `st.stop()` : la page rendait jusqu'à un certain
+nombre d'éléments, puis n'importe quel élément supplémentaire déclenchait
+l'erreur.
+
+**Cause** : bug du front de Streamlit 1.32.0 (nœud de conteneur sans
+`deltaBlock`), révélé par l'allongement de la page avec le volume de données
+du jour ; la même page passait le matin avec moins de lignes.
+
+**Correctif** : `streamlit==1.37.1` dans `requirements.txt`, images
+`dashboard` et `ml-monitor` reconstruites, page vérifiée connectée (onglets
+Vue d'ensemble et Performance ML).
+
+**Leçon** : une dépendance de présentation épinglée sur une version ancienne
+est aussi un risque de démo ; le test de bout en bout devrait ouvrir la page
+connectée dans un navigateur sans tête, pas seulement interroger `/_stcore/health`.
+
 ## 6. Ce qui reste hors périmètre MLOps
 
 Cf. [ML_INTEGRATION_STRATEGY.md §8](ML_INTEGRATION_STRATEGY.md#8-ce-qui-reste-hors-périmètre)

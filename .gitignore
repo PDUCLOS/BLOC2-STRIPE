@@ -54,3 +54,6 @@ crash.log
 
 # Générateurs locaux des livrables de présentation (docx, drawio) — hors dépôt
 presentation/generators/
+
+# Runs MLflow locaux (entraînement lancé sans MLFLOW_TRACKING_URI) — le serveur MLflow fait foi
+mlruns/
