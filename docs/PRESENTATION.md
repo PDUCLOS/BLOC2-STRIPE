@@ -384,7 +384,7 @@ fact_transactions ──────── dim_merchants
 - Backend SQLite + artefacts servis via l'API HTTP du serveur (`--serve-artifacts`) : un client MLflow (host macOS ou conteneur) n'a jamais besoin d'accéder directement au système de fichiers du conteneur `mlflow`, tout passe par HTTP
 
 **Evidently — détection de dérive, dans `ml/monitor.py` (service `ml-monitor`) :**
-- Boucle continue (toutes les `ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) : compare les features de la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes de transactions) à celles utilisées à l'entraînement (`DataDriftPreset`, `share_of_drifted_columns`)
+- Boucle continue (toutes les `ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) : compare les features de la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes de transactions) à celles utilisées à l'entraînement (`DataDriftPreset`, `share_of_drifted_columns` sur les 5 features comportementales ; heure et jour exclus car ils dérivent par construction)
 - Calcule en parallèle le rappel du modèle actuel sur les données fraîches (vérité terrain = `is_fraud_pattern` du générateur) — un modèle peut ne montrer aucun dérive de features et quand même décrocher en performance (dérive de concept), d'où les deux signaux, pas un seul
 - Si `drift_share > ML_DRIFT_THRESHOLD` (0.3 par défaut) OU `recall < ML_MIN_RECALL` (0.7 par défaut) : déclenche automatiquement `ml/train_fraud_model.py` — un délai de carence (3× l'intervalle) évite de relancer un entraînement à chaque cycle tant que le problème persiste
 - Chaque cycle écrit un document dans `MongoDB.ml_monitoring` (statut, dérive, performance, décision de réentraînement) — c'est ce que lit l'onglet "Performance ML" du dashboard
@@ -653,7 +653,7 @@ conditions réelles (stack Docker complète) :
 │   └── seed_data.py             # 200 merchants, 5000 customers, ~8000 payment methods
 │
 ├── producers/
-│   ├── transaction_producer.py  # INSERT continu de transactions (95% legit, 5% fraud)
+│   ├── transaction_producer.py  # INSERT continu (95 % légitimes, 5 % fraude : 3 profils dont « furtive »)
 │   ├── flink_like_job.py        # scoring fraud (Kafka→Redis→score[règles|ML]→Kafka) + write-back PG
 │   └── mongo_writer.py          # consumer Kafka→Mongo (transaction_logs, fraud_alerts, ml_features)
 │

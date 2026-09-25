@@ -86,6 +86,9 @@ DASHBOARD_USERNAME = os.environ.get("DASHBOARD_USERNAME", "")
 DASHBOARD_PASSWORD_HASH = os.environ.get("DASHBOARD_PASSWORD_HASH", "")
 MAX_LOGIN_ATTEMPTS = int(os.environ.get("DASHBOARD_MAX_LOGIN_ATTEMPTS", 5))
 LOCKOUT_SECONDS = int(os.environ.get("DASHBOARD_LOCKOUT_SECONDS", 60))
+# Mot de passe de démo locale (même valeur que scripts/init_env.sh) — sert seulement
+# à reconnaître la configuration de démo pour afficher l'aide de connexion.
+DEMO_PASSWORD = "Bloc2-Demo-2026"
 
 
 def _check_credentials(username: str, password: str) -> bool:
@@ -125,6 +128,11 @@ def require_login():
 
     st.title(":credit_card: Stripe Polyglot — Dashboard")
     st.caption("Accès restreint — données financières et de fraude.")
+    # Identifiants de démo affichés UNIQUEMENT si le hash configuré est celui du
+    # mot de passe de démo (scripts/init_env.sh) : avec un vrai mot de passe
+    # (DASHBOARD_PASSWORD=… make init-env), rien n'est révélé.
+    if hmac.compare_digest(hashlib.sha256(DEMO_PASSWORD.encode()).hexdigest(), DASHBOARD_PASSWORD_HASH):
+        st.info(f"Démo locale — identifiants : **{DASHBOARD_USERNAME}** / **{DEMO_PASSWORD}**")
     with st.form("login_form"):
         username = st.text_input("Utilisateur")
         password = st.text_input("Mot de passe", type="password")

@@ -369,19 +369,21 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
 3. Pour chaque tick (1 / `--rate` sec) :
    - Décide `is_fraud = random.random() < --fraud-ratio`.
    - Si pas de rafale en cours : pioche un merchant + (customer, pm) selon le segment (`new`/`inactive` pour fraude, `standard`/`premium` pour normal).
-   - 30% des fraudes déclenchent un **rafale** de 12-20 txns rapides (card testing simulé).
-   - Construit la transaction avec `build_transaction(is_fraud)` :
-     - `is_fraud=True` → 70% gros montant (100-2000€), 30% petit (1-5€) pour card testing.
-     - 50% des fraudes vont dans un pays à risque (`RU`/`NG`/`KP`/`IR`/`VE`).
-     - 30% des fraudes utilisent `device=pos` (atypique).
+   - Construit la transaction avec `build_transaction(is_fraud)` selon un **profil** tiré dans `FRAUD_PROFILES` :
+     - `brutal` (35 %) : 100-2 000 €, 60 % pays à risque (`RU`/`NG`/`KP`/`IR`/`VE`), 30 % `device=pos` ; rafale de 3-8 txns une fois sur trois.
+     - `card_testing` (25 %) : 1-5 €, toujours en rafale de 4-10 txns rapides, 20 % pays à risque.
+     - `furtive` (40 %) : montant 20-600 €, pays et appareil ordinaires, pas de rafale — **indiscernable par les features actuelles**, ce qui plafonne volontairement le rappel.
+   - Côté légitime, du bruit réaliste : 3 % de paiements depuis un pays à risque (voyage), 8 % sur terminal POS, 2 % de gros achats (500-2 000 €), et 4 % de rafales honnêtes de 3-6 achats (plus lentes qu'un card testing).
+   - `metadata.fraud_profile` conserve le profil pour l'analyse ; `user_agent` n'est qu'un indice (la moitié des fraudes gardent un navigateur normal).
    - INSERT dans `transactions` (Debezium capte).
 4. **Signal handler** : `SIGINT`/`SIGTERM` → `_running = False` (arrêt gracieux).
 5. Stats affichées tous les 25 txns.
 
 **Points d'attention** :
 - `metadata.is_fraud_pattern` = `True` est volontairement mis dans le JSONB → permet de mesurer
-  la **rappel** du modèle (combien de fraudes réelles sont détectées).
-- Le rafale crée de la vélocité côté Redis → c'est ce qui déclenche la règle R4.
+  le **rappel** du modèle (combien de fraudes réelles sont détectées).
+- Les rafales créent de la vélocité côté Redis → c'est ce qui déclenche la règle R4 ; les rafales légitimes font que la vélocité seule ne prouve rien.
+- Pourquoi cette complexité : avec l'ancien générateur (fraude = gros montant + pays à risque + rafale de 12-20), les 7 features recodaient exactement la recette et le modèle affichait 0,99 de précision servie, chiffre qui mesurait la fidélité du pipeline, pas la difficulté du problème (cf. `ML_INTEGRATION_STRATEGY.md`, « Validité externe »).
 
 ### 4.2 — [`flink_like_job.py`](../producers/flink_like_job.py) — Le scorer fraude
 
@@ -608,7 +610,7 @@ import _env  # noqa: F401
 
 **Logique** (`check_once()`, appelée toutes les `ML_MONITOR_INTERVAL_SECONDS`) :
 1. Récupère la référence (`extract_training_data()` + le même split que l'entraînement) et la fenêtre courante (`extract_current_window()`)
-2. `compute_drift()` — Evidently `DataDriftPreset`, extrait `share_of_drifted_columns`
+2. `compute_drift()` — Evidently `DataDriftPreset` sur les 5 features comportementales (`hour_of_day` et `day_of_week` exclues : une fenêtre de 30 min dérive toujours d'une référence étalée sur des heures), extrait `share_of_drifted_columns`
 3. `compute_live_performance()` — applique le modèle actuel aux données fraîches, calcule precision/recall/f1 contre la vérité terrain
 4. Si `drift_share > ML_DRIFT_THRESHOLD` OU `recall < ML_MIN_RECALL` : appelle `train_fraud_model.main()` directement (import Python, pas un sous-process) — protégé par un délai de carence pour ne pas réentraîner à chaque cycle si le problème persiste
 5. Écrit un document dans `MongoDB.ml_monitoring` à chaque cycle — c'est la source de données de l'onglet "Performance ML" du dashboard

@@ -38,15 +38,16 @@ Insère 200 merchants, 5000 customers, ~8000 payment_methods dans Postgres.
 ## `producers/` — Génération, scoring, persistance
 
 ### [`transaction_producer.py`](../producers/transaction_producer.py)
-Génère un flux continu de transactions (95% légitimes / 5% fraude).
+Génère un flux continu de transactions (95 % légitimes / 5 % de fraude tirée parmi trois profils : brutal, card testing, furtive) avec du bruit réaliste côté légitime.
 
 | Fonction | Rôle |
 |---|---|
 | `pick_merchant(cur)` | Marchand actif aléatoire |
 | `pick_customer_pm(cur, is_fraud)` | Cible les segments `new`/`inactive` si fraude (profil type) |
-| `build_transaction(is_fraud)` | Construit le payload — pose `metadata.is_fraud_pattern`, la **vérité terrain** utilisée par `ml/train_fraud_model.py` |
+| `pick_fraud_profile()` | Tire le profil de fraude (`FRAUD_PROFILES` : brutal 35 %, card testing 25 %, furtive 40 %) |
+| `build_transaction(is_fraud, profile)` | Construit le payload selon le profil — pose `metadata.is_fraud_pattern` (**vérité terrain** de `ml/train_fraud_model.py`) et `metadata.fraud_profile` |
 | `insert_transaction(cur, txn)` | `INSERT` paramétré dans `transactions` |
-| `main()` | Boucle continue, gère les rafales ("rafales") simulant du card testing |
+| `main()` | Boucle continue ; rafales de fraude (card testing, brutal) et rafales légitimes (4 % des clients) |
 
 ### [`flink_like_job.py`](../producers/flink_like_job.py)
 Scorer fraude temps réel — lit `stripe.public.transactions`, écrit `fraud_score`.

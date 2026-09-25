@@ -181,7 +181,7 @@ boucle continue (`ML_MONITOR_INTERVAL_SECONDS`, 120s par défaut) :
 
 | Métrique | Outil | Calcul |
 |---|---|---|
-| Dérive des données | **Evidently** (`DataDriftPreset`) | `share_of_drifted_columns` entre la fenêtre de référence (split d'entraînement) et la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes) |
+| Dérive des données | **Evidently** (`DataDriftPreset`) | `share_of_drifted_columns` entre la fenêtre de référence (split d'entraînement) et la fenêtre courante (dernières `ML_MONITOR_WINDOW_MINUTES` minutes), sur les 5 features comportementales : les features calendaires (`hour_of_day`, `day_of_week`) sont exclues car elles dérivent par construction entre une fenêtre courte et une référence longue |
 | Performance live | scikit-learn | precision/recall/f1 du modèle actuel appliqué aux données fraîches, contre la vérité terrain (`is_fraud_pattern`) |
 | Historique | MongoDB `ml_monitoring` | Un document par cycle — lu par le dashboard |
 
