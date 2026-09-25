@@ -128,7 +128,7 @@ def main():
                 "created_at": now,
             })
 
-            # logs — monitoring opérationnel (requêtes stripe_queries_nosql.js Section 3)
+            # logs — monitoring opérationnel (requêtes queries/mongodb_queries.js §9-§10)
             # Collection séparée pour distinguer les traces techniques des données métier.
             db.logs.insert_one({
                 "service": "mongo-writer",

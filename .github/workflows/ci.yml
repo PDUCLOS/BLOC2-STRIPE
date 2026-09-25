@@ -163,13 +163,18 @@ jobs:
           nohup env KAFKA_BROKERS=localhost:29092 .venv/bin/python producers/flink_like_job.py \
             > /tmp/scorer.log 2>&1 &
           echo $! > /tmp/scorer.pid
+          nohup env KAFKA_BROKERS=localhost:29092 .venv/bin/python producers/mongo_writer.py \
+            > /tmp/mongo_writer.log 2>&1 &
+          echo $! > /tmp/mongo_writer.pid
           sleep 20
 
       - name: make refresh-views (vues matérialisées créées WITH NO DATA)
         run: make refresh-views
 
       - name: make test (tests/test_e2e.py)
-        run: make test
+        # E2E_STRICT : une collection Mongo vide est un échec, pas un SKIP
+        # (mongo_writer tourne, fraud_alerts doit contenir des documents).
+        run: E2E_STRICT=1 make test
 
       - name: make queries-check (livrable 8 — requêtes SQL et NoSQL)
         run: make queries-check

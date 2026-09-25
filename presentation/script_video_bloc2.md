@@ -12,7 +12,7 @@ est à réenregistrer avec ce script.
 
 ```bash
 cd "Projet bloc 2"
-docker compose up -d                       # stack complète
+docker compose --profile airflow up -d     # 8 services + Airflow = 9 conteneurs
 bash scripts/create_topics.sh              # idempotent
 bash scripts/deploy_debezium.sh            # connecteur CDC
 set -a && source .env && set +a

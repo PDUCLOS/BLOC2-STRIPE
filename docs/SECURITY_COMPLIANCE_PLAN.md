@@ -204,6 +204,7 @@ hors périmètre de ce document.
 | Rôle `replication_user` restreint (lecture seule) | ✅ Fait |
 | Rôle `analytics_reader` sans accès `fingerprint` | ✅ Fait — vérifié en base réelle (§3.2) |
 | TLS sur les connexions inter-services | ❌ Désactivé en démo, activable en prod (§4) |
+| Compte applicatif PostgreSQL sans privilège superutilisateur | ❌ `stripe_app` est le superutilisateur créé par l'image (`POSTGRES_USER`) : écart assumé du PoC. Cible : rôle applicatif dédié sans `SUPERUSER`, mot de passe maître RDS géré par RDS (`modules/rds`) |
 | Alerting actif (PagerDuty/Slack) | ❌ Non implémenté (§7.2) |
 | Audit trail des accès DB | ❌ Non implémenté (§7.2) |
 | Endpoint RGPD Art. 15 (droit d'accès) | ❌ Non implémenté (§5) |

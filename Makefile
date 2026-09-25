@@ -98,9 +98,18 @@ status:
 # Données
 # ─────────────────────────────────────────────────────────
 .PHONY: seed
-seed:
+seed: mongo-indexes
 	@$(PYTHON) seed/seed_data.py
 	@echo "[OK] Seed terminé"
+
+# Rejoue init/mongo/01_init_collections.js (idempotent) : les scripts de
+# docker-entrypoint-initdb.d ne tournent qu'à la création du volume, donc un
+# nouvel index (ex. TTL de `logs`) n'arrive jamais sur une installation existante.
+.PHONY: mongo-indexes
+mongo-indexes:
+	@docker exec -i stripe-mongo mongosh --quiet -u "$$MONGO_USER" -p "$$MONGO_PASSWORD" \
+		--authenticationDatabase admin < init/mongo/01_init_collections.js
+	@echo "[OK] Collections et index MongoDB à jour"
 
 .PHONY: producer
 producer:

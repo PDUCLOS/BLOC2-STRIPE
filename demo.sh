@@ -18,14 +18,13 @@ if [ ! -f .env ]; then
     bash scripts/init_env.sh
 fi
 
-# 2. venv
-if [ ! -d venv ]; then
-    echo "Création du venv Python 3.11..."
-    /opt/homebrew/bin/python3.11 -m venv venv
-    ./venv/bin/pip install --upgrade pip > /dev/null 2>&1
-    ./venv/bin/pip install -r requirements.txt
-    ./venv/bin/pip install python-snappy  # pour la décompression Kafka snappy
+# 2. venv — le même .venv que le Makefile, le README et la CI (make install)
+if [ ! -x .venv/bin/python ]; then
+    make install
 fi
+# mongo_writer : un venv hébergé sur Google Drive peut bloquer sur `import kafka`
+# (cf. README « Projet sur Google Drive ») — surcharger MONGO_WRITER_PYTHON si besoin.
+MONGO_WRITER_PYTHON="${MONGO_WRITER_PYTHON:-./.venv/bin/python}"
 
 # Load env
 set -a
@@ -60,10 +59,10 @@ bash scripts/postgres_init_roles.sh > /dev/null 2>&1
 bash scripts/deploy_debezium.sh > /dev/null 2>&1
 
 # 6. Seed si nécessaire
-COUNT=$(./venv/bin/python -c "import psycopg2, os; c=psycopg2.connect(host=os.environ['PG_HOST'], dbname=os.environ['PG_DB'], user=os.environ['PG_USER'], password=os.environ['PG_PASSWORD']); cur=c.cursor(); cur.execute('SELECT count(*) FROM merchants'); print(cur.fetchone()[0])")
+COUNT=$(./.venv/bin/python -c "import psycopg2, os; c=psycopg2.connect(host=os.environ['PG_HOST'], dbname=os.environ['PG_DB'], user=os.environ['PG_USER'], password=os.environ['PG_PASSWORD']); cur=c.cursor(); cur.execute('SELECT count(*) FROM merchants'); print(cur.fetchone()[0])")
 if [ "$COUNT" -lt 100 ]; then
     echo "Seed des données (200 merchants, 5000 customers)..."
-    ./venv/bin/python seed/seed_data.py 2>&1 | tail -5
+    ./.venv/bin/python seed/seed_data.py 2>&1 | tail -5
 else
     echo "[OK] Seed déjà fait ($COUNT merchants)"
 fi
@@ -83,13 +82,13 @@ echo "Lancement du pipeline..."
 echo ""
 
 # Logs redirigés dans /tmp pour conserver un terminal propre pendant la soutenance.
-./venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &
+./.venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &
 echo "  → Flink-like job (PID $!)"
 
-./venv/bin/python -u producers/mongo_writer.py > /tmp/mongo.log 2>&1 &
+"$MONGO_WRITER_PYTHON" -u producers/mongo_writer.py > /tmp/mongo.log 2>&1 &
 echo "  → Mongo writer (PID $!)"
 
-./venv/bin/streamlit run dashboard/app.py \
+./.venv/bin/streamlit run dashboard/app.py \
     --server.port 8501 \
     --server.address 0.0.0.0 \
     --server.headless true \
@@ -108,15 +107,15 @@ echo "  Kafka Connect : http://localhost:8083"
 echo "  MLflow :        http://localhost:5001"
 echo ""
 echo "  Pour lancer le producer de transactions :"
-echo "    ./venv/bin/python producers/transaction_producer.py --rate 3"
+echo "    ./.venv/bin/python producers/transaction_producer.py --rate 3"
 echo ""
 echo "  Pour activer le scoring ML (après make ml-train) :"
 echo "    pkill -9 -f flink_like_job.py"
-echo "    SCORING_ENGINE=ml ./venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &"
+echo "    SCORING_ENGINE=ml ./.venv/bin/python -u producers/flink_like_job.py > /tmp/flink.log 2>&1 &"
 echo "    docker compose up -d ml-monitor   # drift + réentraînement auto"
 echo ""
 echo "  Pour lancer le test E2E :"
-echo "    ./venv/bin/python tests/test_e2e.py"
+echo "    ./.venv/bin/python tests/test_e2e.py"
 echo ""
 echo "  Pour arrêter tout :"
 echo "    pkill -9 -f flink_like_job.py"

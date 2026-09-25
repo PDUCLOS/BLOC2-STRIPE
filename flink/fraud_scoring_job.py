@@ -31,8 +31,9 @@ PG_DB            = os.environ.get("PG_DB", "stripe_oltp")
 PG_USER          = os.environ.get("PG_USER", "stripe_app")
 PG_PASSWORD      = os.environ.get("PG_PASSWORD", "")
 
-FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))
-REVIEW_THRESHOLD = float(os.environ.get("REVIEW_THRESHOLD", 0.60))
+# Mêmes noms que producers/flink_like_job.py et .env.example (anciens noms en repli).
+FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_SCORE_THRESHOLD", os.environ.get("FRAUD_THRESHOLD", 0.85)))
+REVIEW_THRESHOLD = float(os.environ.get("REVIEW_SCORE_THRESHOLD", os.environ.get("REVIEW_THRESHOLD", 0.60)))
 
 HIGH_RISK_COUNTRIES = {"RU", "NG", "KP", "IR", "VE", "BY"}
 

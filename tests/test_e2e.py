@@ -48,8 +48,10 @@ MONGO_URI = os.environ.get(
     f"mongodb://{MONGO_APP_USER}:{MONGO_APP_PASSWORD}@{MONGO_HOST}:{MONGO_PORT}/{MONGO_DB}?authSource={MONGO_DB}",
 )
 
-FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_THRESHOLD", 0.85))
-REVIEW_THRESHOLD = float(os.environ.get("REVIEW_THRESHOLD", 0.60))
+# Mêmes variables que producers/flink_like_job.py (cf. .env.example) : les tests
+# doivent juger les décisions avec les seuils réellement servis.
+FRAUD_THRESHOLD  = float(os.environ.get("FRAUD_SCORE_THRESHOLD", os.environ.get("FRAUD_THRESHOLD", 0.85)))
+REVIEW_THRESHOLD = float(os.environ.get("REVIEW_SCORE_THRESHOLD", os.environ.get("REVIEW_THRESHOLD", 0.60)))
 
 PASS = "[OK]"
 FAIL = "[FAIL]"
@@ -334,7 +336,9 @@ def test_mongo_fraud_alerts_schema():
     doc = db["fraud_alerts"].find_one()
     client.close()
     if doc is None:
-        # Pas d'alerte encore — pas bloquant
+        # Pas d'alerte encore : non bloquant en local, mais échec en CI
+        # (E2E_STRICT=1) où mongo_writer tourne et doit avoir écrit.
+        assert not os.environ.get("E2E_STRICT"), "fraud_alerts vide alors que mongo_writer devrait avoir écrit"
         return
     # "created_at", pas "timestamp" — nom du champ tel qu'écrit par mongo_writer.py.
     for field in ["txn_id", "fraud_score", "decision", "created_at"]:
