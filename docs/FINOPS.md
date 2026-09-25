@@ -16,10 +16,10 @@ Certification AIA RNCP41993 — Bloc 2 (compétence C8)
 |---|---|
 | Stack Docker Compose sur poste personnel | 0 € (hors électricité) |
 | GitHub Actions (dépôt public) | 0 € |
-| Snowflake | 0 € (dry-run, aucun compte) |
+| Snowflake (compte d'essai, 400 $ de crédits offerts) | 0,024 crédit mesuré pour le bootstrap, deux exports de 57 000 lignes et les requêtes OLAP (warehouse X-Small, `AUTO_SUSPEND = 60`) |
 
 La contrainte budget explique les écarts assumés du PoC : 1 broker Kafka,
-pas de TLS interne, Snowflake non connecté.
+pas de TLS interne, Snowflake sur un compte d'essai.
 
 ## 2. Cible PROD — environ 3 100 $/mois
 

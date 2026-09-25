@@ -1,7 +1,8 @@
 name: CI
 
-# Déclenché sur push/PR vers main — pas de secrets requis (Snowflake reste
-# en dry-run, cf. etl/load_snowflake.py, docs/ARCHITECTURE.md). Tout le
+# Déclenché sur push/PR vers main — pas de secrets requis : sans variables
+# SNOWFLAKE_*, l'export Snowflake retombe en dry-run (cf. etl/load_snowflake.py) ;
+# en local, le compte d'essai est branché (make snowflake-check). Tout le
 # reste de la stack tourne réellement via docker compose sur le runner.
 on:
   push:

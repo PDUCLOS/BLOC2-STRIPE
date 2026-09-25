@@ -176,6 +176,12 @@ snowflake-export:
 	@$(PYTHON) etl/load_snowflake.py
 	@echo "[OK] Export batch vers Snowflake terminé"
 
+# Exécute réellement queries/snowflake_olap.sql sur le compte configuré et
+# échoue au premier statement en erreur. Sauté (sortie 0) sans SNOWFLAKE_ACCOUNT.
+.PHONY: snowflake-check
+snowflake-check:
+	@$(PYTHON) etl/snowflake_queries_check.py
+
 .PHONY: refresh-views
 refresh-views:
 	@$(PYTHON) etl/refresh_views.py
@@ -183,7 +189,8 @@ refresh-views:
 # Livrable 8 : exécute toutes les requêtes de queries/ sur la stack qui tourne.
 # ON_ERROR_STOP=1 (psql) et mongosh --file s'arrêtent au premier échec : une
 # requête désalignée du schéma réel fait échouer la cible (et la CI).
-# queries/snowflake_olap.sql n'est pas exécuté (Snowflake en dry-run).
+# queries/snowflake_olap.sql est exécuté par `make snowflake-check` quand
+# SNOWFLAKE_ACCOUNT est renseigné (compte d'essai en local ; sauté en CI).
 .PHONY: queries-check
 queries-check:
 	@echo "── PostgreSQL : refresh des vues matérialisées puis queries/postgres_oltp.sql ──"

@@ -33,18 +33,17 @@ with DAG(
 
     # Note : la création du schéma (etl/snowflake_setup.py) N'EST PAS dans ce
     # DAG — c'est un bootstrap ponctuel (make snowflake-setup), pas une étape
-    # à rejouer chaque nuit. La faire tourner ici échouerait bruyamment tous
-    # les jours tant qu'aucun compte Snowflake réel n'est configuré, alors
-    # que le schéma n'a besoin d'être créé qu'une seule fois.
+    # à rejouer chaque nuit : le schéma n'a besoin d'être créé qu'une seule fois.
     #
-    # Sans SNOWFLAKE_ACCOUNT configuré, cette tâche tourne en dry-run (affiche
-    # ce qui serait chargé sans écrire) plutôt que d'échouer — cf.
-    # load_to_snowflake() dans etl/load_snowflake.py. Permet au DAG de
-    # s'exécuter de bout en bout même sans compte Snowflake réel connecté
-    # (contexte démo/certification).
+    # Sans SNOWFLAKE_ACCOUNT (cas de la CI), cette tâche tourne en dry-run
+    # (affiche ce qui serait chargé sans écrire) plutôt que d'échouer — cf.
+    # load_to_snowflake() dans etl/load_snowflake.py. Avec le compte d'essai
+    # configuré dans .env, elle charge réellement fact_transactions (premier
+    # run réel le 25/09/2026 : 59 119 lignes, rejeu sans doublon).
     export_transactions = BashOperator(
         task_id="snowflake_export",
-        bash_command="python /opt/airflow/etl/load_snowflake.py",
+        # {{ ds }} = date logique du run = la veille pour ce DAG quotidien à 02:00 UTC
+        bash_command="python /opt/airflow/etl/load_snowflake.py --date {{ ds }}",
     )
 
     # Les vues mv_daily_revenue / mv_merchant_stats sont créées WITH NO DATA

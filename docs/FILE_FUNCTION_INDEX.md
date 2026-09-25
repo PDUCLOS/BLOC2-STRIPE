@@ -113,7 +113,7 @@ Boucle continue (service Docker `ml-monitor`) : dérive + performance **réellem
 
 ---
 
-## `etl/` — Export Snowflake (⚠ dry-run, pas de compte réel connecté)
+## `etl/` — Export Snowflake (compte d'essai branché le 25/09/2026 ; dry-run sans `SNOWFLAKE_ACCOUNT`)
 
 ### [`snowflake_setup.py`](../etl/snowflake_setup.py)
 Bootstrap **manuel ponctuel** (`make snowflake-setup`) — jamais dans le DAG quotidien.
@@ -130,7 +130,8 @@ Export batch quotidien, appelé par le DAG Airflow.
 |---|---|
 | `extract_from_pg(target_date)` | Transactions `succeeded` du jour, JOIN `payment_methods` + `merchants` (nécessaire pour `upsert_dimensions`) |
 | `upsert_dimensions(sf_cur, rows)` | Insère les nouvelles lignes `dim_merchant`/`dim_customer`/`dim_payment_method` **avant** le MERGE des faits — sans ça, les FK des faits seraient NULL |
-| `load_to_snowflake(rows, target_date)` | `MERGE INTO fact_transactions`, dry-run si `SNOWFLAKE_ACCOUNT` absent |
+| `create_staging(sf_cur)` | Table temporaire de transit du lot (le connecteur ne réécrit en multi-lignes qu'un `INSERT ... VALUES`) |
+| `load_to_snowflake(rows, target_date)` | Par lot : `INSERT` dans la table de transit, dimensions par `INSERT ... WHERE NOT EXISTS`, puis `MERGE INTO fact_transactions` avec clés résolues par `LEFT JOIN` ; dry-run si `SNOWFLAKE_ACCOUNT` absent |
 | `main()` | Extrait puis charge |
 
 ### [`refresh_views.py`](../etl/refresh_views.py)

@@ -86,67 +86,70 @@ def extract_from_pg(target_date: date):
     return [dict(r) for r in rows]
 
 
-def upsert_dimensions(sf_cur, rows):
-    """Insère les nouvelles dimensions référencées par ce batch de transactions.
+STAGING_TABLE = "stg_transactions"
+
+
+def create_staging(sf_cur):
+    """Crée la table temporaire de transit du chargement (durée de vie : la session).
+
+    Le connecteur Snowflake ne sait réécrire en multi-lignes qu'un
+    `INSERT ... VALUES (%s, ...)` : un `executemany` sur un `MERGE` ou un
+    `INSERT ... SELECT ... WHERE NOT EXISTS` échoue (erreur 252001, constatée
+    au premier export réel du 25/09/2026 — le dry-run ne pouvait pas le voir).
+    On charge donc chaque lot dans cette table, puis dimensions et faits sont
+    alimentés par des requêtes ensemblistes, en une instruction chacune.
+    """
+    sf_cur.execute(f"""
+        CREATE OR REPLACE TEMPORARY TABLE {STAGING_TABLE} (
+            txn_id VARCHAR(36), merchant_id VARCHAR(36), customer_id VARCHAR(36), pm_id VARCHAR(36),
+            date_key NUMBER, country VARCHAR(2), amount_eur NUMBER(18,2), fee_amount NUMBER(18,4),
+            currency CHAR(3), status VARCHAR(20), fraud_score NUMBER(5,4), is_fraud BOOLEAN,
+            device_type VARCHAR(50), processing_ms NUMBER(8,2), created_at TIMESTAMP_TZ,
+            merchant_name VARCHAR(255), merchant_email VARCHAR(255), merchant_country VARCHAR(2),
+            merchant_tier VARCHAR(20), merchant_status VARCHAR(20), pm_type VARCHAR(30), pm_brand VARCHAR(20)
+        )
+    """)
+
+
+def upsert_dimensions(sf_cur):
+    """Insère les dimensions référencées par le lot présent dans la table de transit.
 
     Nécessaire AVANT le MERGE de fact_transactions : les sous-requêtes
     `(SELECT merchant_key FROM dim_merchant WHERE merchant_id = ...)` de
     load_to_snowflake() renvoient NULL si la ligne dimension n'existe pas
     encore — sans cet appel, merchant_key/customer_key/pm_key seraient NULL
-    sur tous les faits chargés.
-
-    Args:
-        sf_cur: Curseur Snowflake.
-        rows (list[dict]): Batch de transactions (sortie de extract_from_pg()).
+    sur tous les faits chargés. Colonne Snowflake = "country" (cf.
+    snowflake_setup.py), pas "country_code" comme côté Postgres.
     """
-    # dim_merchant — même pattern INSERT ... WHERE NOT EXISTS que dim_customer
-    # et dim_payment_method ci-dessous (pas de MERGE ... FROM VALUES : ce
-    # dialecte VALUES attend des littéraux, pas des paramètres liés %s).
-    # Colonne Snowflake = "country" (cf. snowflake_setup.py dim_merchant DDL),
-    # pas "country_code" comme côté Postgres — les noms divergent entre les
-    # deux schémas, à ne pas confondre lors d'une extension de ce mapping.
-    merchant_vals = list({
-        r["merchant_id"]: (r["merchant_id"], r.get("merchant_name"), r.get("merchant_email"),
-                           r.get("merchant_country_code"), r.get("merchant_tier"), r.get("merchant_status"))
-        for r in rows if r.get("merchant_id")
-    }.values())
-    if merchant_vals:
-        sf_cur.executemany(
-            "INSERT INTO dim_merchant (merchant_id, name, email, country, tier, status) "
-            "SELECT %s, %s, %s, %s, %s, %s WHERE NOT EXISTS "
-            "(SELECT 1 FROM dim_merchant WHERE merchant_id = %s)",
-            [(m[0], m[1], m[2], m[3], m[4], m[5], m[0]) for m in merchant_vals]
-        )
-
-    # dim_customer
-    customer_vals = list({
-        r["customer_id"]: (r["customer_id"],)
-        for r in rows if r.get("customer_id")
-    }.values())
-    if customer_vals:
-        sf_cur.executemany(
-            "INSERT INTO dim_customer (customer_id) SELECT %s WHERE NOT EXISTS (SELECT 1 FROM dim_customer WHERE customer_id = %s)",
-            [(c[0], c[0]) for c in customer_vals]
-        )
-
-    # dim_payment_method
-    pm_vals = list({
-        r["pm_id"]: (r["pm_id"], r.get("pm_type", "card"), r.get("pm_brand"))
-        for r in rows if r.get("pm_id")
-    }.values())
-    if pm_vals:
-        sf_cur.executemany(
-            "INSERT INTO dim_payment_method (pm_id, type, brand) SELECT %s, %s, %s WHERE NOT EXISTS (SELECT 1 FROM dim_payment_method WHERE pm_id = %s)",
-            [(p[0], p[1], p[2], p[0]) for p in pm_vals]
-        )
+    sf_cur.execute(f"""
+        INSERT INTO dim_merchant (merchant_id, name, email, country, tier, status)
+        SELECT DISTINCT s.merchant_id, s.merchant_name, s.merchant_email, s.merchant_country,
+               s.merchant_tier, s.merchant_status
+        FROM {STAGING_TABLE} s
+        WHERE s.merchant_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM dim_merchant d WHERE d.merchant_id = s.merchant_id)
+    """)
+    sf_cur.execute(f"""
+        INSERT INTO dim_customer (customer_id)
+        SELECT DISTINCT s.customer_id FROM {STAGING_TABLE} s
+        WHERE s.customer_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM dim_customer d WHERE d.customer_id = s.customer_id)
+    """)
+    sf_cur.execute(f"""
+        INSERT INTO dim_payment_method (pm_id, type, brand)
+        SELECT DISTINCT s.pm_id, COALESCE(s.pm_type, 'card'), s.pm_brand FROM {STAGING_TABLE} s
+        WHERE s.pm_id IS NOT NULL
+          AND NOT EXISTS (SELECT 1 FROM dim_payment_method d WHERE d.pm_id = s.pm_id)
+    """)
 
 
 def load_to_snowflake(rows, target_date: date):
     """Charge les lignes dans la table fact_transactions via MERGE (idempotent).
-    
-    La fonction procède par lots (batches) définis par BATCH_SIZE pour éviter de
-    surcharger la mémoire ou d'atteindre les limites de taille de requête.
-    
+
+    Par lots de BATCH_SIZE : chaque lot transite par une table temporaire,
+    puis les dimensions manquantes sont insérées et les faits fusionnés sur
+    txn_id, en une instruction ensembliste par table.
+
     Args:
         rows (list[dict]): Liste des transactions à insérer.
         target_date (date): La date de traitement (pour l'affichage/log).
@@ -161,6 +164,7 @@ def load_to_snowflake(rows, target_date: date):
         warehouse=SF_WH, database=SF_DB, schema=SF_SCHEMA,
     )
     cur = sf.cursor()
+    create_staging(cur)
 
     # Construction de la date_key
     def date_key(ts):
@@ -170,13 +174,9 @@ def load_to_snowflake(rows, target_date: date):
         return int(d.strftime("%Y%m%d"))
 
     loaded = 0
-    # Traitement par lots pour contrôler mémoire et temps d'exécution côté driver.
+    inserted_total = 0
     for i in range(0, len(rows), BATCH_SIZE):
         batch = rows[i: i + BATCH_SIZE]
-
-        # Doit précéder le MERGE de fact_transactions : les FK merchant_key/
-        # customer_key/pm_key résolues plus bas dépendent de ces lignes.
-        upsert_dimensions(cur, batch)
 
         values = []
         for r in batch:
@@ -188,7 +188,6 @@ def load_to_snowflake(rows, target_date: date):
             # stable si le MERGE est rejoué (idempotence du chargement).
             import random; random.seed(str(r["txn_id"]))
             processing_ms = round(20 + random.random() * 25, 1)
-
             values.append((
                 str(r["txn_id"]),
                 str(r["merchant_id"]) if r["merchant_id"] else None,
@@ -205,16 +204,31 @@ def load_to_snowflake(rows, target_date: date):
                 r.get("device_type"),
                 processing_ms,
                 r["created_at"],
+                r.get("merchant_name"), r.get("merchant_email"), r.get("merchant_country_code"),
+                r.get("merchant_tier"), r.get("merchant_status"),
+                r.get("pm_type"), r.get("pm_brand"),
             ))
 
-        # MERGE sur txn_id : idempotent en cas de relance du même batch.
-        cur.executemany("""
+        cur.execute(f"TRUNCATE TABLE {STAGING_TABLE}")
+        cur.executemany(
+            f"INSERT INTO {STAGING_TABLE} VALUES ({', '.join(['%s'] * 22)})", values
+        )
+
+        # Dimensions d'abord : les clés de substitution résolues par le MERGE en dépendent.
+        upsert_dimensions(cur)
+
+        # MERGE sur txn_id : idempotent en cas de relance du même lot ou du même jour.
+        # Clés de substitution résolues par LEFT JOIN dans USING : Snowflake
+        # n'accepte pas de sous-requête corrélée dans le VALUES d'un MERGE.
+        cur.execute(f"""
             MERGE INTO fact_transactions tgt
-            USING (SELECT
-                %s AS txn_id, %s AS mid, %s AS cid, %s AS pmid,
-                %s AS dkey, %s AS country, %s AS amount, %s AS fee,
-                %s AS currency, %s AS status, %s AS fscore, %s AS is_fraud,
-                %s AS device, %s AS proc_ms, %s AS created_at
+            USING (
+                SELECT s.*, dm.merchant_key, dc.customer_key, dp.pm_key, dg.geo_key
+                FROM {STAGING_TABLE} s
+                LEFT JOIN dim_merchant       dm ON dm.merchant_id = s.merchant_id
+                LEFT JOIN dim_customer       dc ON dc.customer_id = s.customer_id
+                LEFT JOIN dim_payment_method dp ON dp.pm_id       = s.pm_id
+                LEFT JOIN dim_geography      dg ON dg.country_code = s.country
             ) src ON tgt.txn_id = src.txn_id
             WHEN NOT MATCHED THEN INSERT (
                 txn_id, merchant_key, customer_key, pm_key, date_key, geo_key,
@@ -222,18 +236,15 @@ def load_to_snowflake(rows, target_date: date):
                 device_type, processing_ms, created_at
             )
             VALUES (
-                src.txn_id,
-                (SELECT merchant_key FROM dim_merchant WHERE merchant_id = src.mid),
-                (SELECT customer_key FROM dim_customer WHERE customer_id = src.cid),
-                (SELECT pm_key FROM dim_payment_method WHERE pm_id = src.pmid),
-                src.dkey,
-                (SELECT geo_key FROM dim_geography WHERE country_code = src.country),
-                src.amount, src.fee, src.currency, src.status, src.fscore, src.is_fraud,
-                src.device, src.proc_ms, src.created_at
+                src.txn_id, src.merchant_key, src.customer_key, src.pm_key, src.date_key, src.geo_key,
+                src.amount_eur, src.fee_amount, src.currency, src.status, src.fraud_score, src.is_fraud,
+                src.device_type, src.processing_ms, src.created_at
             )
-        """, values)
+        """)
+        inserted = cur.fetchone()[0] if cur.rowcount is None else cur.rowcount
+        inserted_total += inserted or 0
         loaded += len(batch)
-        print(f"  → {loaded}/{len(rows)} lignes chargées")
+        print(f"  → {loaded}/{len(rows)} lignes traitées ({inserted_total} nouvelles dans fact_transactions)")
 
     sf.commit()
     cur.close()
@@ -247,7 +258,15 @@ def main():
     Orchestre l'extraction des données depuis PostgreSQL, l'insertion éventuelle des dimensions,
     et le chargement des faits dans Snowflake. Conçu pour être exécuté quotidiennement.
     """
-    target = date.today()
+    # Date cible : --date YYYY-MM-DD (le DAG passe {{ ds }}, c'est-à-dire la
+    # veille pour une planification quotidienne à 02:00 UTC), sinon aujourd'hui
+    # pour un lancement manuel. Sans cet argument, le DAG exportait le jour qui
+    # commence — quelques minutes de données — au lieu de la journée écoulée.
+    import argparse
+    parser = argparse.ArgumentParser(description="Export quotidien PostgreSQL → Snowflake")
+    parser.add_argument("--date", help="Jour à exporter (YYYY-MM-DD), défaut : aujourd'hui")
+    args = parser.parse_args()
+    target = date.fromisoformat(args.date) if args.date else date.today()
     print(f"[START] ETL PostgreSQL → Snowflake — {target}")
     print(f"   Source : {PG_CONFIG['host']}/{PG_CONFIG['dbname']}")
     print(f"   Cible  : {SF_DB}.{SF_SCHEMA}.fact_transactions")

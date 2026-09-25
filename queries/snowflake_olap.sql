@@ -7,15 +7,16 @@
 --                      processing_ms, CLUSTER BY (date_key, merchant_key))
 --   dim_date, dim_merchant, dim_customer, dim_payment_method, dim_geography
 --
--- ⚠ NON EXÉCUTÉES dans la démo : aucun compte Snowflake n'est connecté,
--- etl/load_snowflake.py tourne en dry-run (cf. README, section Snowflake).
--- Pour les exécuter : make snowflake-setup && make snowflake-export, puis
--- snowsql -f queries/snowflake_olap.sql.
+-- Exécutées sur le compte d'essai depuis le 25/09/2026 : make snowflake-setup
+-- && make snowflake-export, puis make snowflake-check (etl/snowflake_queries_check.py)
+-- qui rejoue ce fichier statement par statement et échoue à la première erreur.
+-- Sans SNOWFLAKE_ACCOUNT (CI), la vérification est sautée.
 -- Les pré-agrégats temps réel côté PostgreSQL (mv_daily_revenue,
 -- mv_merchant_stats) sont dans queries/postgres_oltp.sql §7.
 -- =============================================================================
 
-USE SCHEMA STRIPE_DW.ANALYTICS;
+-- Même base et schéma que etl/snowflake_setup.py (SNOWFLAKE_DB / SNOWFLAKE_SCHEMA)
+USE SCHEMA STRIPE_DWH.PROD;
 
 -- -----------------------------------------------------------------------------
 -- 1. Revenu, commissions et fraude par région et trimestre

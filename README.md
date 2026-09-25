@@ -2,10 +2,13 @@
 
 > Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL (OLTP) · MongoDB (logs/features/alertes) · Kafka + Debezium (CDC) · Redis (feature store online) · Scoring fraude temps réel (règles + XGBoost) · MLflow + Evidently (tracking/monitoring ML) · Streamlit (dashboard) · Airflow (orchestration batch).
 >
-> **Snowflake (OLAP) n'est PAS connecté dans cette démo** — aucun compte
-> trial configuré. `etl/load_snowflake.py` tourne en dry-run (affiche ce
-> qui serait chargé, n'écrit rien) ; le schéma star existe (`make
-> snowflake-setup`) mais n'est jamais peuplé. Voir "Snowflake (optionnel)" plus bas.
+> **Snowflake (OLAP) est branché sur un compte d'essai** (AWS eu-west-3)
+> depuis le 25/09/2026 : `make snowflake-setup` a créé le schéma en étoile,
+> `make snowflake-export` et le DAG Airflow `stripe_daily_etl` chargent
+> réellement `fact_transactions` (59 119 lignes au premier jour, MERGE
+> idempotent), et `queries/snowflake_olap.sql` s'exécute (`make
+> snowflake-check`). Sans variables `SNOWFLAKE_*` dans `.env` (cas de la CI),
+> l'export retombe en dry-run.
 
 **Commentaire précis** : ce README sert de script de démonstration technique. L'ordre des sections suit le parcours réel d'exécution (quickstart -> pipeline live -> vérifications -> tests).
 
@@ -311,7 +314,7 @@ au projet. Coûts estimés et leviers d'optimisation : [docs/FINOPS.md](docs/FIN
 |---|---|---|
 | [`queries/postgres_oltp.sql`](queries/postgres_oltp.sql) | PostgreSQL 16 : revenu, décisions fraude, précision servie, RFM, vélocité, vues matérialisées, EXPLAIN, RGPD sous ROLLBACK | Oui |
 | [`queries/mongodb_queries.js`](queries/mongodb_queries.js) | MongoDB 7 : alertes, règles déclenchées, logs, feature store, monitoring ML, index TTL | Oui |
-| [`queries/snowflake_olap.sql`](queries/snowflake_olap.sql) | Snowflake : schéma en étoile, fenêtres, Dynamic Table | Non (Snowflake en dry-run) |
+| [`queries/snowflake_olap.sql`](queries/snowflake_olap.sql) | Snowflake : schéma en étoile, fenêtres, Dynamic Table | Oui, en local (`make snowflake-check`, compte d'essai) ; sautée en CI (pas de secret Snowflake) |
 
 ## Prérequis
 
@@ -357,5 +360,8 @@ Pour un usage réel, voici les étapes et ce qui change dans le projet :
    sur MWAA (module `terraform/modules/airflow`), avec les secrets Snowflake
    dans Secrets Manager.
 
-Tant que ces étapes ne sont pas faites, Snowflake reste en dry-run et n'est
-pas présenté comme branché au pipeline live.
+Le projet tourne aujourd'hui sur un **compte d'essai** (rôle `ACCOUNTADMIN`,
+authentification par mot de passe, région AWS eu-west-3) : suffisant pour la
+démonstration, à remplacer par les étapes ci-dessus avant tout usage réel.
+Coût mesuré du bootstrap, de deux exports de 57 000 lignes et des requêtes :
+0,024 crédit, soit quelques centimes.

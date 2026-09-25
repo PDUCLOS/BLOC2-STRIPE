@@ -508,8 +508,8 @@ Le **scoring** a deux moteurs, choisis par `SCORING_ENGINE` : **XGBoost** (`ml`,
    - Batches de 5000 (perf).
    - Calcul `fee_amount = amount_eur * 0.014` (simule la commission Stripe).
    - Calcul `processing_ms` (aléatoire déterministe par `txn_id`).
-   - MERGE INTO `fact_transactions` (clé `txn_id`).
-6. Si `SNOWFLAKE_ACCOUNT` vide → **dry-run** (log seulement).
+   - Lot inséré dans une table temporaire `stg_transactions`, dimensions manquantes par `INSERT ... WHERE NOT EXISTS`, puis un seul MERGE INTO `fact_transactions` (clé `txn_id`, clés de dimension résolues par `LEFT JOIN` dans `USING` : Snowflake refuse les sous-requêtes corrélées dans le `VALUES` d'un MERGE).
+6. Si `SNOWFLAKE_ACCOUNT` vide → **dry-run** (log seulement). Branché sur un compte d'essai depuis le 25/09/2026 : 59 119 lignes chargées le premier jour, rejeu par le DAG sans doublon.
 
 **Points d'attention** :
 - Les jointures `dim_*.X = src.X` dans le MERGE résolvent les `*_key` (surrogate keys).

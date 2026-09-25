@@ -1,6 +1,6 @@
 # Speech de soutenance — Bloc 2 Stripe (5 minutes)
 
-**Rythme visé : environ 130 mots par minute.** Le texte compte environ 650 mots, soit 4 min 58 à débit calme : il reste 30 secondes pour respirer et changer de slide.
+**Rythme visé : environ 130 mots par minute.** Le texte compte environ 650 mots, soit 5 min 00 à débit calme : il reste 30 secondes pour respirer et changer de slide.
 Les minutages sont cumulés. Les passages entre crochets sont des indications pour vous : ne les lisez pas à voix haute.
 
 ---
@@ -29,8 +29,7 @@ Et au milieu, **Kafka** relie tout, avec **Redis** comme mémoire rapide pour le
 
 Voici l'architecture qui tourne réellement : conteneurisée avec Docker Compose, lancée en une commande, versionnée sur GitHub.
 À gauche, l'OLTP et le batch. Au centre, le streaming. À droite, le NoSQL et le machine learning.
-Un point de transparence : sans compte Snowflake, le chargement OLAP tourne en simulation. Le schéma et le code sont prêts.
-*[Si vous créez un compte d'essai Snowflake d'ici le jury, dites plutôt : « Le chargement Snowflake est branché sur un compte d'essai. »]*
+Snowflake est branché sur un compte d'essai : le DAG Airflow y charge la veille chaque nuit.
 
 ### Slide 5 — Le parcours de la donnée · 1:40 → 2:15
 
@@ -60,7 +59,7 @@ Des index TTL purgent les logs après 90 jours : le RGPD est appliqué par la ba
 Le cœur du projet : la fraude en temps réel, décidée en moins de 100 millisecondes.
 Deux moteurs : un modèle **XGBoost**, et des règles en repli automatique.
 Au-delà de 0,6, revue ; au-delà de 0,85, blocage.
-Sur 90 minutes de trafic réel, le modèle bloque **64 % des fraudes** avec **88 % de précision**, en met 10 % de plus en revue, et chaque blocage est tracé dans `fraud_indicators`, dans la même transaction que le score. Les fraudes furtives, 40 % du total, sont l'angle mort assumé.
+Sur 90 minutes de trafic réel, le modèle bloque **64 % des fraudes** avec **88 % de précision**, en met 10 % de plus en revue ; chaque blocage est tracé dans `fraud_indicators`, dans la même transaction que le score.
 **MLflow** trace les entraînements ; **Evidently** surveille la dérive et relance un entraînement si la qualité baisse.
 
 ### Slide 11 — Du PoC local à la cible cloud · 4:10 → 4:35

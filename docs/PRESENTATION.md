@@ -3,12 +3,13 @@
 > Projet Bloc 2 — Certification Jedha Architecte en intelligence artificielle (RNCP41993)
 > Démo end-to-end d'une plateforme de paiement polyglot : PostgreSQL · MongoDB · Kafka · Debezium · Redis · Flink · Streamlit · Airflow · XGBoost · MLflow · Evidently
 >
-> **Snowflake n'est PAS branché dans le pipeline live de cette démo.**
-> Le schéma OLAP (star schema) est conçu et scripté (§3.7), mais sans
-> compte Snowflake réel configuré, `etl/load_snowflake.py` tourne
-> uniquement en dry-run. Aucune donnée n'atterrit jamais dans un vrai
-> warehouse Snowflake dans cette démo — c'est une brique documentée et
-> prête, pas une brique opérationnelle.
+> **Snowflake est branché depuis le 25/09/2026** sur un compte d'essai :
+> schéma en étoile créé par `etl/snowflake_setup.py`, 59 119 transactions
+> chargées par `etl/load_snowflake.py` (à la main puis par le DAG Airflow,
+> MERGE idempotent vérifié : 0 doublon au rejeu), requêtes OLAP et Dynamic
+> Table exécutées. Le premier export réel a révélé deux bugs invisibles en
+> dry-run (`executemany` sur un `MERGE`, sous-requête corrélée dans un
+> `MERGE`), corrigés le jour même. Sans compte (CI), l'export reste en dry-run.
 
 ---
 
@@ -495,9 +496,12 @@ Mauvaise idée — `snowflake_setup.py` est un bootstrap **ponctuel** (créer le
 schéma une fois), pas une étape à rejouer chaque nuit, et il échoue
 bruyamment (`sys.exit(1)`) sans compte Snowflake réel configuré — ce qui est
 le comportement voulu pour un lancement manuel (`make snowflake-setup`),
-mais ferait échouer le DAG *tous les jours* en environnement démo. Le DAG
-n'orchestre que `snowflake_export` (qui, lui, a un vrai mode dry-run
-gracieux) ; la création du schéma reste une commande manuelle séparée.
+mais ferait échouer le DAG *tous les jours* sur une stack sans compte. Le DAG
+n'orchestre que `snowflake_export` (qui, lui, retombe en dry-run sans
+`SNOWFLAKE_ACCOUNT`) ; la création du schéma reste une commande manuelle séparée.
+Le DAG passe `--date {{ ds }}` : pour une planification quotidienne à 02:00 UTC,
+la date logique est la veille — sans cet argument, l'export prenait
+`date.today()`, soit quelques minutes du jour qui commence.
 
 ---
 
@@ -607,7 +611,7 @@ conditions réelles (stack Docker complète) :
 - **Modèle écrasé à chaque réentraînement** : le rechargement à chaud prend bien la nouvelle version, mais l'ancienne n'est conservée que dans MLflow ; pas de retour arrière automatique si la nouvelle version est moins bonne (cf. §3.8).
 - **Airflow en mode standalone** (SQLite, SequentialExecutor, un seul process) : suffisant pour démontrer l'orchestration, pas dimensionné pour un vrai débit de DAGs concurrents.
 - **`analytics_reader`** limite l'accès en lecture à `payment_methods.fingerprint`, mais aucun rôle équivalent n'existe encore côté MongoDB (un seul utilisateur applicatif `stripe_app` avec `readWrite` complet).
-- **Snowflake reste en dry-run** sans compte trial réel configuré — le DAG et le script d'export tournent bout en bout, mais rien n'est physiquement chargé dans un warehouse tant que `SNOWFLAKE_ACCOUNT` n'est pas renseigné.
+- **Snowflake tourne sur un compte d'essai** avec le rôle `ACCOUNTADMIN` et un mot de passe : rôles `LOADER`/`ANALYST`, clé RSA et network policy restent à faire pour un usage réel (README, « Passer à un compte Snowflake payant »).
 
 ### 8.3 Améliorations prioritaires restantes
 
