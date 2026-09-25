@@ -103,7 +103,7 @@ un sens (comparer des choses calculées de la même façon).
 
 | Aspect | Implémentation réelle |
 |---|---|
-| Algorithme | XGBoost (`xgboost.XGBClassifier`), 200 arbres, profondeur 4 |
+| Algorithme | XGBoost (`xgboost.XGBClassifier`), jusqu'à 600 arbres de profondeur 5, arrêt anticipé sur validation temporelle (117 retenus le 25/09), sous-échantillonnage 0,8, `min_child_weight` 5, L2 = 2 |
 | Déséquilibre de classes | `scale_pos_weight = n_neg / n_pos`, calculé dynamiquement sur chaque run (≈16-17% de fraude sur les runs de test réels, cohérent avec `FRAUD_RATIO` du générateur) |
 | Validation | Split **temporel** 80/20 (`temporal_train_test_split()`) — pas aléatoire, pour éviter une fuite d'information via la corrélation temporelle des vélocités |
 | Fréquence de réentraînement | Manuelle (`make ml-train`) ou automatique (service `ml-monitor`, cf. §6) |
@@ -111,27 +111,44 @@ un sens (comparer des choses calculées de la même façon).
 
 **Résultats mesurés** — la source de vérité est toujours
 `ml/models/fraud_xgboost-v1.meta.json`, réécrit à chaque entraînement
-(manuel ou automatique). Deux runs du 15/09/2026 :
+(manuel ou automatique). Depuis le 25/09/2026, le générateur produit une fraude
+réaliste (profils brutal / card testing / furtive, bruit légitime) et
+l'entraînement s'arrête par validation temporelle ; les chiffres du 15/09
+(précision 0,95, rappel 0,97) mesuraient un générateur trop lisible et ne sont
+conservés que dans les post-mortems de [MLOPS.md](MLOPS.md).
 
-| Run | Déclencheur | Transactions train / test | Précision | Rappel | F1 | ROC AUC |
-|---|---|---|---|---|---|---|
-| 15:53 UTC | `make ml-train` | 81 626 / 20 407 | 0,95 | 0,97 | 0,96 | 0,995 |
-| 17:10 UTC | ml-monitor (dérive 0,43 > 0,3) | 86 976 / 21 744 | 0,77 | 0,97 | 0,86 | 0,990 |
+| Mesure (25/09/2026) | Précision | Rappel | Contexte |
+|---|---|---|---|
+| Offline, seuil 0,5 | 0,76 | 0,88 | 12 591 transactions (13,4 % de fraude), split temporel 10 072 / 2 519, AUC 0,96, AP 0,90, 117 arbres retenus sur 600 |
+| Offline, **au seuil de blocage 0,85** | 0,89 | 0,80 | Même jeu de test : c'est la métrique comparable à la performance servie |
+| **Servie**, 07:40-09:10 UTC (90 min) | **0,88** | **0,64** | 32 281 transactions scorées, 4 683 fraudes (14,5 %), 407 faux positifs (1,5 % des légitimes), 1 758 mises en revue |
 
-Sur la même période, la **précision servie** (décisions réelles du scorer
-comparées au label du générateur, `queries/postgres_oltp.sql` §3) est restée
-entre 0,93 et 0,99 par minute, **y compris juste après le réentraînement de
-17:10** (17:11 : 185 VP / 2 FP). La chute offline vient du jeu de test : la
-fenêtre la plus récente contient le redémarrage de la stack, avec un Redis
-vide et des rafales de trafic de rattrapage, que le split temporel place
-entièrement dans le test. Leçon retenue dans [MLOPS.md](MLOPS.md) : une
-métrique offline isolée ne suffit pas à juger un modèle réentraîné
-automatiquement, il faut la confronter à la performance servie.
+Par profil de fraude sur la même fenêtre : card testing bloqué à 80 % (+ 20 % en
+revue), brutal à 56 % (+ 32 %), furtive à 2,5 % (+ 10 %). La fraude furtive est
+l'angle mort assumé : rien dans les 7 features ne la distingue d'un achat normal.
 
-Le taux de fraude du jeu de test (~25 %) est supérieur aux 5 % injectés par
-le producteur, car les rafales de fraude (`[BURST]`) génèrent beaucoup de
-transactions pour un même client. Avec un vrai taux de 0,1 à 0,5 %, la
-précision baisserait mécaniquement à rappel égal.
+**Le rappel servi a baissé pendant la démonstration** : 0,82 sur la première
+demi-heure, 0,40 sur la dernière, pendant que la précision montait de 0,83 à
+0,95. Cinq réentraînements automatiques, déclenchés par une dérive de vélocité
+(le jeu d'amorçage avait été généré à 25 tx/s, le trafic réel tourne à 5 tx/s),
+ont produit des modèles de plus en plus conservateurs au seuil de blocage.
+Conséquences tirées le jour même : un **retour arrière automatique** dans
+`ml/monitor.py` (le nouveau modèle est rejeté si son rappel au seuil de blocage
+recule de plus de `ML_ROLLBACK_TOLERANCE` = 0,10), et le modèle de 07:38
+(version 71 du registre MLflow) restauré depuis le registre. Détail dans
+[MLOPS.md](MLOPS.md) §5.5.
+
+### Validité externe : ce que ces chiffres ne disent pas
+
+Les labels viennent du générateur, pas de rétrofacturations réelles, et le
+trafic scoré contient **14,5 % de fraude** contre 0,1 à 0,5 % dans un vrai flux
+de paiement. À rappel et taux de faux positifs constants (0,64 et 1,5 %), sur
+100 000 paiements avec 0,3 % de fraude, le modèle bloquerait 192 fraudes et
+1 466 paiements légitimes : **précision d'environ 12 %**. En production, le
+seuil de blocage se règle donc sur le coût métier d'un faux positif, la revue
+manuelle absorbe la zone grise, et la précision se mesure sur des chargebacks
+confirmés à J+30. Les 0,88 servis démontrent que la chaîne de mesure
+fonctionne, pas que le problème est résolu.
 
 Sortie : [`ml/models/fraud_xgboost-v1.pkl`](../ml/models) (gitignored,
 généré par `make ml-train`) + `.meta.json` (métriques, feature names, run

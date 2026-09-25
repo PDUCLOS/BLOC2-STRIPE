@@ -298,6 +298,46 @@ Vue d'ensemble et Performance ML).
 est aussi un risque de démo ; le test de bout en bout devrait ouvrir la page
 connectée dans un navigateur sans tête, pas seulement interroger `/_stcore/health`.
 
+### 5.5 — Réentraînements automatiques successifs et recul du rappel servi (2026-09-25)
+
+**Contexte** : nouveau générateur réaliste (profils brutal / card testing /
+furtive, bruit légitime), jeu d'amorçage de 12 591 transactions généré à 25 tx/s,
+puis trafic réel à 5 tx/s pendant 90 minutes avec le modèle XGBoost.
+
+**Symptôme** : rappel servi de 0,82 sur la première demi-heure, 0,40 sur la
+dernière ; précision de 0,83 à 0,95 sur la même période. Cinq réentraînements
+automatiques entre-temps, tous déclenchés par `drift_share` = 0,40.
+
+**Cause** : (1) la dérive était réelle mais artificielle — vélocités du jeu
+d'amorçage (25 tx/s) sans commune mesure avec le trafic réel (5 tx/s) ; (2)
+chaque réentraînement apprenait sur un mélange amorçage + trafic réel plus
+ambigu, produisant des probabilités moins extrêmes : au seuil de blocage fixe
+(0,85), de moins en moins de fraudes passaient la barre (`recall_at_block`
+offline de 0,80 à 0,61) alors que la métrique académique à 0,5 restait bonne
+(rappel 0,92). Le monitoring voyait le rappel servi passer sous 0,7, ce qui
+déclenchait… un réentraînement de plus.
+
+**Correctifs** :
+- `ml/monitor.py` : **retour arrière automatique** — le modèle courant est
+  sauvegardé avant réentraînement ; si le nouveau `recall_at_block` recule de
+  plus de `ML_ROLLBACK_TOLERANCE` (0,10), l'ancien `.pkl` est restauré et le
+  document `ml_monitoring` porte `rolled_back: true` avec les deux métriques.
+- Modèle de 07:38 UTC (registre MLflow `fraud-detector` version 71,
+  `recall_at_block` 0,80) restauré à la main depuis le registre : c'est
+  exactement l'usage du registre.
+- `ml/train_fraud_model.py` : **minimum de 100 arbres** après arrêt anticipé —
+  le premier réentraînement après déploiement du garde-fou s'était arrêté
+  après quelques arbres (`recall_at_block` = 0, rejeté par le retour arrière).
+  Le réentraînement suivant, avec ce plancher, a été accepté : 0,61 → 0,82.
+- Les features calendaires ont été exclues du test de dérive (§ précédent) ;
+  la dérive de vélocité restante s'éteint d'elle-même quand le trafic réel
+  domine la référence.
+
+**Leçons** : un réentraînement n'est pas une action neutre, il faut une
+condition d'acceptation et un chemin de retour ; la métrique à surveiller est
+celle du seuil réellement servi, pas celle à 0,5 ; et un jeu d'amorçage doit
+ressembler au trafic qu'il précède.
+
 ## 6. Ce qui reste hors périmètre MLOps
 
 Cf. [ML_INTEGRATION_STRATEGY.md §8](ML_INTEGRATION_STRATEGY.md#8-ce-qui-reste-hors-périmètre)

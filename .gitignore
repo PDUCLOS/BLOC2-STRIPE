@@ -23,6 +23,7 @@ data/
 # === Artefacts modèle ML — générés par make ml-train, pas versionnés (cf. docs/ML_INTEGRATION_STRATEGY.md) ===
 ml/models/*.pkl
 ml/models/*.meta.json
+ml/models/*.prev
 
 # === Logs ===
 *.log

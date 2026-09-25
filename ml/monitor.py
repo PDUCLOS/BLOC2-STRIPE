@@ -179,6 +179,52 @@ def compute_served_performance(db, window_minutes):
     }
 
 
+
+# ── Retour arrière automatique ────────────────────────────────────────────────
+# Constat du 25/09/2026 : des réentraînements successifs déclenchés par une
+# dérive de vélocité ont fait passer le rappel servi de 0,82 à 0,40 en 90 min,
+# chaque nouveau modèle étant plus conservateur au seuil de blocage (0,85).
+# Un réentraînement n'est donc accepté que si sa métrique au seuil de blocage
+# ne recule pas de plus de ML_ROLLBACK_TOLERANCE par rapport au modèle en place ;
+# sinon l'ancien .pkl est restauré (le scorer le recharge par son mtime).
+ROLLBACK_TOLERANCE = float(os.environ.get("ML_ROLLBACK_TOLERANCE", 0.10))
+_PREV_SUFFIX = ".prev"
+
+
+def _model_key_metric(meta: dict):
+    m = (meta or {}).get("metrics") or {}
+    return m.get("recall_at_block", m.get("recall"))
+
+
+def _snapshot_model():
+    """Copie le modèle courant et ses métadonnées avant un réentraînement."""
+    import shutil
+    meta_path = TRAINED_MODEL_PATH.with_suffix(".meta.json")
+    if not TRAINED_MODEL_PATH.exists() or not meta_path.exists():
+        return None
+    shutil.copy2(TRAINED_MODEL_PATH, str(TRAINED_MODEL_PATH) + _PREV_SUFFIX)
+    shutil.copy2(meta_path, str(meta_path) + _PREV_SUFFIX)
+    return json.loads(meta_path.read_text())
+
+
+def _guard_rollback(previous_meta):
+    """Compare le nouveau modèle à l'ancien ; restaure l'ancien s'il régresse."""
+    import shutil
+    meta_path = TRAINED_MODEL_PATH.with_suffix(".meta.json")
+    new_meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+    before, after = _model_key_metric(previous_meta), _model_key_metric(new_meta)
+    out = {"model_metric_before": before, "model_metric_after": after, "rolled_back": False}
+    if before is None or after is None:
+        return out
+    if after < before - ROLLBACK_TOLERANCE:
+        shutil.copy2(str(TRAINED_MODEL_PATH) + _PREV_SUFFIX, TRAINED_MODEL_PATH)
+        shutil.copy2(str(meta_path) + _PREV_SUFFIX, meta_path)
+        out["rolled_back"] = True
+        print(f"[ROLLBACK] recall_at_block {after:.2f} < {before:.2f} - {ROLLBACK_TOLERANCE} : ancien modèle restauré")
+    else:
+        print(f"[OK] Nouveau modèle accepté : recall_at_block {before} → {after}")
+    return out
+
 def check_once(db, last_retrain_at):
     """Exécute un cycle de monitoring complet. Retourne le nouveau last_retrain_at."""
     checked_at = datetime.now(timezone.utc)
@@ -244,8 +290,10 @@ def check_once(db, last_retrain_at):
         print(f"[ALERT] Réentraînement déclenché : {'; '.join(reasons)}")
         doc["retrain_triggered"] = True
         try:
+            previous = _snapshot_model()
             retrain_model()
             last_retrain_at = now_ts
+            doc.update(_guard_rollback(previous))
         except SystemExit:
             # extract_training_data() peut sortir via sys.exit(1) si les
             # données sont insuffisantes entre-temps — non fatal pour la boucle.

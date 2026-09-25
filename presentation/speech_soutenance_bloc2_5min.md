@@ -60,7 +60,7 @@ Des index TTL purgent les logs après 90 jours : le RGPD est appliqué par la ba
 Le cœur du projet : la fraude en temps réel, décidée en moins de 100 millisecondes.
 Deux moteurs : un modèle **XGBoost**, et des règles en repli automatique.
 Au-delà de 0,6, revue ; au-delà de 0,85, blocage.
-Sur le trafic réellement scoré, le modèle bloque **96 % des fraudes** avec **93 % de précision**, et chaque blocage est tracé dans `fraud_indicators`, dans la même transaction que le score.
+Sur 90 minutes de trafic réel, le modèle bloque **64 % des fraudes** avec **88 % de précision**, en met 10 % de plus en revue, et chaque blocage est tracé dans `fraud_indicators`, dans la même transaction que le score. Les fraudes furtives, 40 % du total, sont l'angle mort assumé.
 **MLflow** trace les entraînements ; **Evidently** surveille la dérive et relance un entraînement si la qualité baisse.
 
 ### Slide 11 — Du PoC local à la cible cloud · 4:10 → 4:35
@@ -91,7 +91,8 @@ Merci. Je suis prêt pour la démonstration et vos questions.
 | **Que devient un message invalide ?** | Il part dans la dead-letter queue `stripe.etl.dead-letter`, avec le topic, l'offset et l'erreur. On ne perd pas le message et le pipeline continue. |
 | **Comment gérez-vous le droit à l'effacement ?** | La fonction PL/pgSQL `anonymize_customer()` anonymise le client sans casser les clés étrangères. Côté Mongo, les TTL purgent les logs à 90 jours et les interactions à 30 jours. |
 | **Pourquoi un schéma en étoile plutôt qu'en flocon ?** | Il demande moins de jointures, les requêtes BI sont plus simples, et le stockage colonne de Snowflake rend la dénormalisation peu coûteuse. |
-| **Votre rappel est de 96 %, mais avec quelle proportion de fraude ?** | Environ 25 % dans le trafic scoré, alors que le générateur tire 5 % des transactions en fraude : chaque fraude déclenche une rafale de transactions sur le même client. Avec un taux réel de 0,1 à 0,5 %, la précision baisserait à rappel égal ; c'est pourquoi je mesure la précision servie en continu. |
+| **88 % de précision, c'est crédible ?** | Non, pas en absolu : les labels sont synthétiques et le trafic contient 14,5 % de fraude contre 0,1 à 0,5 % en réalité. À rappel et faux positifs constants, sur un vrai flux la précision tomberait vers 12 %. Ce que la démo prouve, c'est la chaîne de mesure : décisions réelles, comparées aux labels, en continu. |
+| **Pourquoi le rappel a baissé pendant la démo ?** | Cinq réentraînements automatiques déclenchés par une dérive de vélocité ont rendu le modèle plus conservateur au seuil de blocage : rappel servi de 0,82 à 0,40. J'ai ajouté le jour même un retour arrière automatique (un modèle qui recule de plus de 0,10 est rejeté) et restauré la version précédente depuis le registre MLflow. |
 | **Quelle est la haute disponibilité en local ?** | Aucune : le PoC tourne avec un seul broker et un facteur de réplication de 1, par choix. La cible utilise MSK avec un facteur de réplication de 3 et `min.insync.replicas=2`, RDS Multi-AZ avec un failover de moins de 30 s, et un replica set Atlas. |
 | **Comment se connecter au dashboard ? Publier le mot de passe n'est-il pas une faille ?** | http://localhost:8501, compte de démo `admin` / `Bloc2-Demo-2026`. Il est publié volontairement : le dashboard n'écoute que sur localhost et n'affiche que des données synthétiques. Seul le hash SHA-256 est stocké, avec verrouillage après 5 échecs ; hors démo on impose un autre mot de passe, et en cible le hash vient de Secrets Manager. |
 | **Combien coûterait la cible ?** | Environ 3 100 $/mois en prod et 1 000 $ en dev, en prix à la demande (`docs/FINOPS.md`). Les quatre bases managées pèsent 65 %. Remplacer MWAA par EventBridge et prendre des engagements 1 an ramène la prod vers 2 400 $. |

@@ -58,6 +58,7 @@ META_PATH = MODEL_DIR / f"fraud_{MODEL_VERSION}.meta.json"
 # statistique — en dessous, le modèle entraîné serait trop instable pour
 # être utile (mieux vaut lancer le producer plus longtemps avant d'entraîner).
 MIN_ROWS = 200
+MIN_TREES = 100  # nombre d'arbres minimal accepté après arrêt anticipé (cf. train_model)
 
 
 def extract_training_data():
@@ -234,6 +235,18 @@ def train_model(X_train, y_train):
     model = xgb.XGBClassifier(**params)
     model.fit(X_fit, y_fit, eval_set=[(X_val, y_val)], verbose=False)
     params["best_iteration"] = int(model.best_iteration)
+    # Garde-fou : si la validation plafonne tout de suite (aucpr plat sur une
+    # fenêtre bruitée), l'arrêt anticipé garde quelques arbres à peine et les
+    # probabilités restent trop tièdes pour franchir le seuil de blocage (0,85)
+    # — observé le 25/09 (recall_at_block = 0). On impose alors MIN_TREES arbres.
+    if params["best_iteration"] + 1 < MIN_TREES:
+        print(f"  Arrêt anticipé trop précoce ({params['best_iteration'] + 1} arbres) : réentraînement à {MIN_TREES} arbres fixes")
+        fixed = {k: v for k, v in params.items() if k not in ("early_stopping_rounds", "best_iteration")}
+        fixed["n_estimators"] = MIN_TREES
+        model = xgb.XGBClassifier(**fixed)
+        model.fit(X_train, y_train, verbose=False)
+        params["best_iteration"] = MIN_TREES - 1
+        params["forced_min_trees"] = True
     print(f"  Arrêt anticipé : {params['best_iteration'] + 1} arbres retenus sur {params['n_estimators']}")
     return model, params
 
